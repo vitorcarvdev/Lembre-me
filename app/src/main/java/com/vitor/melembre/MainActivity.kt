@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vitor.melembre.alarm.ReminderScheduler
+import com.vitor.melembre.data.Recurrence
 import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.ui.HomeScreen
 import com.vitor.melembre.ui.ReminderFormScreen
@@ -109,6 +110,7 @@ private fun MeLembreAppContent(
     var formMessage by remember { mutableStateOf("") }
     var formDate by remember { mutableStateOf(LocalDate.now()) }
     var formTime by remember { mutableStateOf(LocalTime.now().withSecond(0).withNano(0)) }
+    var formRecurrence by remember { mutableStateOf(Recurrence.NONE) }
     var formError by remember { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
@@ -146,6 +148,7 @@ private fun MeLembreAppContent(
                         val (date, time) = initialDateTimeFromReminder(reminder)
                         formDate = date
                         formTime = time
+                        formRecurrence = reminder.recurrenceType
                         formError = null
                         screen = AppScreen.Form(reminder)
                     },
@@ -165,6 +168,7 @@ private fun MeLembreAppContent(
                                     onMessage = { formMessage = it },
                                     onDate = { formDate = it },
                                     onTime = { formTime = it },
+                                    onRecurrence = { formRecurrence = it },
                                     onErrorClear = { formError = null },
                                     onScreen = { screen = it },
                                 )
@@ -190,9 +194,16 @@ private fun MeLembreAppContent(
                     onDateClick = { showDatePicker = true },
                     selectedTime = formTime,
                     onTimeClick = { showTimePicker = true },
+                    recurrence = formRecurrence,
+                    onRecurrenceChange = { formRecurrence = it },
                     onSave = {
                         val scheduledAt = combineDateAndTime(formDate, formTime)
-                        viewModel.saveReminder(current.reminder, formMessage, scheduledAt) { result ->
+                        viewModel.saveReminder(
+                            existing = current.reminder,
+                            message = formMessage,
+                            scheduledAt = scheduledAt,
+                            recurrence = formRecurrence,
+                        ) { result ->
                             when (result) {
                                 ReminderViewModel.SaveResult.Success -> {
                                     formError = null
@@ -295,6 +306,7 @@ private fun openNewReminderForm(
     onMessage: (String) -> Unit,
     onDate: (LocalDate) -> Unit,
     onTime: (LocalTime) -> Unit,
+    onRecurrence: (Recurrence) -> Unit,
     onErrorClear: () -> Unit,
     onScreen: (AppScreen) -> Unit,
 ) {
@@ -302,6 +314,7 @@ private fun openNewReminderForm(
     val (date, time) = initialDateTimeFromReminder(null)
     onDate(date)
     onTime(time)
+    onRecurrence(Recurrence.NONE)
     onErrorClear()
     onScreen(AppScreen.Form(null))
 }

@@ -149,6 +149,14 @@ private fun ReminderCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
+                    reminder.recurrenceType.shortLabelPt?.let { recurrenceLabel ->
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = recurrenceLabel,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 IconButton(onClick = onDelete) {
                     Icon(
