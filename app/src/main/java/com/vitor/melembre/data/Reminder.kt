@@ -9,4 +9,8 @@ data class Reminder(
     val message: String,
     val scheduledAt: Long,
     val triggered: Boolean = false,
-)
+    val recurrence: String = Recurrence.NONE.name,
+) {
+    val recurrenceType: Recurrence
+        get() = Recurrence.fromStorage(recurrence)
+}
