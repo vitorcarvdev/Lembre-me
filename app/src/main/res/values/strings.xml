@@ -3,4 +3,9 @@
     <string name="app_name">Me Lembre</string>
     <string name="app_tagline">Não deixe nada passar.</string>
     <string name="new_reminder">Novo lembrete</string>
+    <string name="voice_reminder">Lembrete por voz</string>
+    <string name="voice_widget_description">Criar lembrete por voz</string>
+    <string name="voice_permission_needed">Permita o microfone para criar lembretes por voz.</string>
+    <string name="voice_not_understood">Não entendi o lembrete. Tente de novo.</string>
+    <string name="voice_unavailable">Reconhecimento de voz indisponível neste aparelho.</string>
 </resources>
