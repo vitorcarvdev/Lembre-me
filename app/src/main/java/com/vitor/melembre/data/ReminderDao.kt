@@ -28,6 +28,15 @@ interface ReminderDao {
     )
     suspend fun getUpcoming(now: Long = System.currentTimeMillis()): List<Reminder>
 
+    @Query(
+        """
+        SELECT * FROM reminders
+        WHERE triggered = 0
+        ORDER BY scheduledAt ASC
+        """,
+    )
+    suspend fun getActiveForReschedule(): List<Reminder>
+
     @Query("SELECT * FROM reminders WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): Reminder?
 
