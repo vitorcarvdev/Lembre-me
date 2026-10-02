@@ -2,6 +2,7 @@ package com.vitor.melembre
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DatePicker
@@ -22,6 +24,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -36,6 +39,7 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vitor.melembre.alarm.ReminderScheduler
 import com.vitor.melembre.data.Recurrence
@@ -53,18 +58,52 @@ import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.ui.HomeScreen
 import com.vitor.melembre.ui.ReminderFormScreen
 import com.vitor.melembre.ui.ReminderViewModel
+import com.vitor.melembre.ui.VoiceConfirmDialog
 import com.vitor.melembre.ui.combineDateAndTime
 import com.vitor.melembre.ui.initialDateTimeFromReminder
 import com.vitor.melembre.ui.theme.MeLembreTheme
+import com.vitor.melembre.voice.ParsedVoiceReminder
+import com.vitor.melembre.voice.VoicePhraseParser
+import com.vitor.melembre.voice.VoiceRecognitionHelper
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+
 class MainActivity : ComponentActivity() {
     private val viewModel: ReminderViewModel by viewModels()
 
+    private val voiceTrigger = mutableIntStateOf(0)
+    private val voiceParsed = mutableStateOf<ParsedVoiceReminder?>(null)
+    private val voiceError = mutableStateOf<String?>(null)
+
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private val audioPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                launchSpeechRecognition()
+            } else {
+                voiceError.value = getString(R.string.voice_permission_needed)
+            }
+        }
+
+    private val speechLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            val spoken = VoiceRecognitionHelper.extractBestResult(result.data)
+            if (spoken.isNullOrBlank()) {
+                voiceError.value = getString(R.string.voice_not_understood)
+                return@registerForActivityResult
+            }
+            val parsed = VoicePhraseParser.parse(spoken)
+            if (parsed == null) {
+                voiceError.value = getString(R.string.voice_not_understood)
+            } else {
+                voiceParsed.value = parsed
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,13 +113,84 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        if (savedInstanceState == null && shouldStartVoice(intent)) {
+            voiceTrigger.intValue += 1
+            intent.action = Intent.ACTION_MAIN
+        }
+
         setContent {
             MeLembreTheme {
                 MeLembreAppContent(
                     viewModel = viewModel,
+                    voiceTrigger = voiceTrigger.intValue,
+                    voiceParsed = voiceParsed.value,
+                    voiceError = voiceError.value,
+                    onConsumeVoiceError = { voiceError.value = null },
+                    onRequestVoice = { startVoiceReminderFlow() },
+                    onConfirmVoice = { parsed ->
+                        val scheduledAt = combineDateAndTime(parsed.date, parsed.time)
+                        viewModel.saveReminder(
+                            existing = null,
+                            message = parsed.message,
+                            scheduledAt = scheduledAt,
+                            recurrence = parsed.recurrence,
+                        ) { result ->
+                            when (result) {
+                                ReminderViewModel.SaveResult.Success -> {
+                                    voiceParsed.value = null
+                                }
+                                ReminderViewModel.SaveResult.PastDateTime -> {
+                                    voiceError.value = "Escolha uma data e horário futuros."
+                                }
+                                ReminderViewModel.SaveResult.ExactAlarmDenied -> {
+                                    voiceError.value = "Ative alarmes exatos nas configurações do Android."
+                                    openExactAlarmSettings()
+                                }
+                                ReminderViewModel.SaveResult.EmptyMessage -> {
+                                    voiceError.value = getString(R.string.voice_not_understood)
+                                }
+                            }
+                        }
+                    },
+                    onEditVoice = { voiceParsed.value = null },
+                    onCancelVoice = { voiceParsed.value = null },
                     onRequestExactAlarmSettings = { openExactAlarmSettings() },
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (shouldStartVoice(intent)) {
+            voiceTrigger.intValue += 1
+            intent.action = Intent.ACTION_MAIN
+            setIntent(intent)
+        }
+    }
+
+    private fun shouldStartVoice(intent: Intent?): Boolean {
+        return intent?.action == VoiceRecognitionHelper.ACTION_START_VOICE_REMINDER
+    }
+
+    fun startVoiceReminderFlow() {
+        when {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED -> launchSpeechRecognition()
+            else -> audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun launchSpeechRecognition() {
+        val speechIntent = VoiceRecognitionHelper.createSpeechIntent()
+        if (speechIntent.resolveActivity(packageManager) == null) {
+            // Em Android 11+ resolveActivity pode falhar sem <queries>; ainda tentamos lançar.
+        }
+        try {
+            speechLauncher.launch(speechIntent)
+        } catch (_: Exception) {
+            voiceError.value = getString(R.string.voice_unavailable)
         }
     }
 
@@ -103,6 +213,14 @@ private sealed class AppScreen {
 @Composable
 private fun MeLembreAppContent(
     viewModel: ReminderViewModel,
+    voiceTrigger: Int,
+    voiceParsed: ParsedVoiceReminder?,
+    voiceError: String?,
+    onConsumeVoiceError: () -> Unit,
+    onRequestVoice: () -> Unit,
+    onConfirmVoice: (ParsedVoiceReminder) -> Unit,
+    onEditVoice: (ParsedVoiceReminder) -> Unit,
+    onCancelVoice: () -> Unit,
     onRequestExactAlarmSettings: () -> Unit,
 ) {
     val reminders by viewModel.upcomingReminders.collectAsStateWithLifecycle()
@@ -115,11 +233,28 @@ private fun MeLembreAppContent(
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
     var exactAlarmHintShown by remember { mutableStateOf(false) }
+    var pendingConfirm by remember { mutableStateOf<ParsedVoiceReminder?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val exactAlarmsAllowed = ReminderScheduler.canScheduleExactAlarms(context)
+
+    LaunchedEffect(voiceTrigger) {
+        if (voiceTrigger > 0) {
+            onRequestVoice()
+        }
+    }
+
+    LaunchedEffect(voiceParsed) {
+        pendingConfirm = voiceParsed
+    }
+
+    LaunchedEffect(voiceError) {
+        val message = voiceError ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        onConsumeVoiceError()
+    }
 
     LaunchedEffect(exactAlarmsAllowed, exactAlarmHintShown) {
         if (!exactAlarmsAllowed && !exactAlarmHintShown) {
@@ -156,6 +291,15 @@ private fun MeLembreAppContent(
                     topBar = {
                         CenterAlignedTopAppBar(
                             title = { HomeHeader() },
+                            actions = {
+                                IconButton(onClick = onRequestVoice) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Mic,
+                                        contentDescription = stringResource(R.string.voice_reminder),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.background,
                             ),
@@ -237,6 +381,27 @@ private fun MeLembreAppContent(
         }
     }
 
+    pendingConfirm?.let { parsed ->
+        VoiceConfirmDialog(
+            parsed = parsed,
+            onConfirm = { onConfirmVoice(parsed) },
+            onEdit = {
+                onEditVoice(parsed)
+                formMessage = parsed.message
+                formDate = parsed.date
+                formTime = parsed.time
+                formRecurrence = parsed.recurrence
+                formError = null
+                pendingConfirm = null
+                screen = AppScreen.Form(null)
+            },
+            onCancel = {
+                pendingConfirm = null
+                onCancelVoice()
+            },
+        )
+    }
+
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
             initialSelectedDateMillis = formDate
@@ -251,7 +416,6 @@ private fun MeLembreAppContent(
                     onClick = {
                         val millis = datePickerState.selectedDateMillis
                         if (millis != null) {
-                            // DatePicker retorna meia-noite UTC da data selecionada.
                             formDate = Instant.ofEpochMilli(millis)
                                 .atZone(java.time.ZoneOffset.UTC)
                                 .toLocalDate()
