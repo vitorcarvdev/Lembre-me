@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vitor.melembre.MeLembreApp
+import com.vitor.melembre.data.Recurrence
 import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.repository.ReminderRepository
 import com.vitor.melembre.util.ReminderValidation
@@ -29,6 +30,7 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
         existing: Reminder?,
         message: String,
         scheduledAt: Long,
+        recurrence: Recurrence,
         onResult: (SaveResult) -> Unit,
     ) {
         if (!ReminderValidation.isMessageValid(message)) {
@@ -42,9 +44,9 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             val result = if (existing == null) {
-                repository.add(message, scheduledAt).map { Unit }
+                repository.add(message, scheduledAt, recurrence).map { Unit }
             } else {
-                repository.update(existing, message, scheduledAt)
+                repository.update(existing, message, scheduledAt, recurrence)
             }
 
             result.fold(

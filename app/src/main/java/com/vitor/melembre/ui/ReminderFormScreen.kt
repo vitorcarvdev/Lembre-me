@@ -1,7 +1,10 @@
 package com.vitor.melembre.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +27,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.vitor.melembre.data.Recurrence
 import com.vitor.melembre.data.Reminder
 import java.time.Instant
 import java.time.LocalDate
@@ -31,7 +36,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ReminderFormScreen(
     existing: Reminder?,
@@ -41,6 +46,8 @@ fun ReminderFormScreen(
     onDateClick: () -> Unit,
     selectedTime: LocalTime,
     onTimeClick: () -> Unit,
+    recurrence: Recurrence,
+    onRecurrenceChange: (Recurrence) -> Unit,
     onSave: () -> Unit,
     onBack: () -> Unit,
     errorMessage: String?,
@@ -97,6 +104,27 @@ fun ReminderFormScreen(
                 value = timeFormatter.format(selectedTime),
                 onClick = onTimeClick,
             )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Repetir",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                Recurrence.entries.forEach { option ->
+                    FilterChip(
+                        selected = recurrence == option,
+                        onClick = { onRecurrenceChange(option) },
+                        label = { Text(option.labelPt) },
+                    )
+                }
+            }
 
             if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(12.dp))
