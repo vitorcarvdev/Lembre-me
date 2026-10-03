@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Me Lembre</string>
+    <string name="app_name">Lembre-me</string>
     <string name="app_tagline">Não deixe nada passar.</string>
     <string name="new_reminder">Novo lembrete</string>
     <string name="voice_reminder">Lembrete por voz</string>

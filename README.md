@@ -1,4 +1,4 @@
-# Me Lembre
+# Lembre-me
 
 Aplicativo Android pessoal para cadastrar lembretes simples (mensagem, data e hora) e receber uma notificação no horário escolhido.
 
@@ -11,11 +11,11 @@ Aplicativo Android pessoal para cadastrar lembretes simples (mensagem, data e ho
 ## Abrir o projeto
 
 1. No Android Studio: **File → Open**
-2. Selecione a pasta do projeto (`melembre`).
+2. Selecione a pasta do projeto (`Lembre-me`).
 
 No Windows, o caminho esperado é:
 
-`D:\LocalHost\www\projetos\sistemas\melembre`
+`D:\LocalHost\www\projetos\sistemas\Lembre-me`
 
 ### Se o sync falhar com "Incompatible Gradle JVM version"
 
