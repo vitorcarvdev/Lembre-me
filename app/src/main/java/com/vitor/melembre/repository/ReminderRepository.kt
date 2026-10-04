@@ -13,6 +13,8 @@ class ReminderRepository(
 ) {
     fun observeUpcoming(): Flow<List<Reminder>> = dao.observeUpcoming()
 
+    fun observeHomeList(): Flow<List<Reminder>> = dao.observeHomeList()
+
     suspend fun add(message: String, scheduledAt: Long, recurrence: Recurrence): Result<Long> {
         if (!ReminderScheduler.canScheduleExactAlarms(appContext)) {
             return Result.failure(ExactAlarmNotAllowedException())
@@ -52,6 +54,18 @@ class ReminderRepository(
     suspend fun delete(reminder: Reminder) {
         ReminderScheduler.cancel(appContext, reminder.id)
         dao.delete(reminder)
+    }
+
+    suspend fun snoozeOneHour(reminder: Reminder): Result<Unit> {
+        if (!ReminderScheduler.canScheduleExactAlarms(appContext)) {
+            return Result.failure(ExactAlarmNotAllowedException())
+        }
+        val newTime = maxOf(System.currentTimeMillis(), reminder.scheduledAt) + 60 * 60 * 1000L
+        ReminderScheduler.cancel(appContext, reminder.id)
+        val updated = reminder.copy(scheduledAt = newTime, triggered = false)
+        dao.update(updated)
+        ReminderScheduler.schedule(appContext, updated)
+        return Result.success(Unit)
     }
 
     class ExactAlarmNotAllowedException : Exception()
