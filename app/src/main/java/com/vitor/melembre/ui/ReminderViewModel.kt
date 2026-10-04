@@ -16,7 +16,7 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
     private val repository: ReminderRepository =
         (application as MeLembreApp).reminderRepository
 
-    val upcomingReminders = repository.observeUpcoming()
+    val homeReminders = repository.observeHomeList()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     sealed class SaveResult {
@@ -65,6 +65,16 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
     fun deleteReminder(reminder: Reminder) {
         viewModelScope.launch {
             repository.delete(reminder)
+        }
+    }
+
+    fun snoozeReminderOneHour(reminder: Reminder, onDenied: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.snoozeOneHour(reminder).onFailure { error ->
+                if (error is ReminderRepository.ExactAlarmNotAllowedException) {
+                    onDenied()
+                }
+            }
         }
     }
 }
