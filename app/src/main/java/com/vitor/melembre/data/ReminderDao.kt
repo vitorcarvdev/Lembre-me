@@ -22,6 +22,19 @@ interface ReminderDao {
     @Query(
         """
         SELECT * FROM reminders
+        ORDER BY
+          CASE
+            WHEN triggered = 0 AND scheduledAt > :now THEN 0
+            ELSE 1
+          END ASC,
+          scheduledAt ASC
+        """,
+    )
+    fun observeHomeList(now: Long = System.currentTimeMillis()): Flow<List<Reminder>>
+
+    @Query(
+        """
+        SELECT * FROM reminders
         WHERE triggered = 0 AND scheduledAt > :now
         ORDER BY scheduledAt ASC
         """,
