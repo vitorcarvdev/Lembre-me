@@ -23,6 +23,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vitor.melembre.alarm.ReminderScheduler
@@ -223,7 +226,7 @@ private fun MeLembreAppContent(
     onCancelVoice: () -> Unit,
     onRequestExactAlarmSettings: () -> Unit,
 ) {
-    val reminders by viewModel.upcomingReminders.collectAsStateWithLifecycle()
+    val reminders by viewModel.homeReminders.collectAsStateWithLifecycle()
     var screen by remember { mutableStateOf<AppScreen>(AppScreen.Home) }
     var formMessage by remember { mutableStateOf("") }
     var formDate by remember { mutableStateOf(LocalDate.now()) }
@@ -288,9 +291,23 @@ private fun MeLembreAppContent(
                         screen = AppScreen.Form(reminder)
                     },
                     onDeleteReminder = viewModel::deleteReminder,
+                    onSnoozeReminder = { reminder ->
+                        viewModel.snoozeReminderOneHour(reminder) {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    message = "Ative alarmes exatos para adiar o lembrete.",
+                                    actionLabel = "Abrir",
+                                ).let { result ->
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        onRequestExactAlarmSettings()
+                                    }
+                                }
+                            }
+                        }
+                    },
                     topBar = {
                         CenterAlignedTopAppBar(
-                            title = { HomeHeader() },
+                            title = { HomeHeader(compact = reminders.isNotEmpty()) },
                             actions = {
                                 IconButton(onClick = onRequestVoice) {
                                     Icon(
@@ -303,6 +320,7 @@ private fun MeLembreAppContent(
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.background,
                             ),
+                            expandedHeight = if (reminders.isNotEmpty()) 48.dp else TopAppBarDefaults.TopAppBarExpandedHeight,
                         )
                     },
                     floatingActionButton = {
@@ -317,10 +335,19 @@ private fun MeLembreAppContent(
                                     onScreen = { screen = it },
                                 )
                             },
+                            modifier = Modifier.size(48.dp),
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
+                            elevation = FloatingActionButtonDefaults.elevation(
+                                defaultElevation = 2.dp,
+                                pressedElevation = 4.dp,
+                            ),
                         ) {
-                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_reminder))
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = stringResource(R.string.new_reminder),
+                                modifier = Modifier.size(22.dp),
+                            )
                         }
                     },
                 )
@@ -484,19 +511,28 @@ private fun openNewReminderForm(
 }
 
 @Composable
-private fun HomeHeader() {
+private fun HomeHeader(compact: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = stringResource(R.string.app_name),
-            style = MaterialTheme.typography.headlineLarge,
+            style = if (compact) {
+                MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 18.sp,
+                    lineHeight = 22.sp,
+                )
+            } else {
+                MaterialTheme.typography.headlineLarge
+            },
             color = MaterialTheme.colorScheme.onBackground,
         )
-        Text(
-            text = stringResource(R.string.app_tagline),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        if (!compact) {
+            Text(
+                text = stringResource(R.string.app_tagline),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
