@@ -1,6 +1,8 @@
 package com.vitor.melembre.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,7 +15,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -37,18 +42,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vitor.melembre.data.Reminder
+import com.vitor.melembre.data.TaskList
 import com.vitor.melembre.util.DateTimeFormatters
+import com.vitor.melembre.util.ListColors
+import com.vitor.melembre.util.ReminderOrdering
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     reminders: List<Reminder>,
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    filterReady: Boolean,
+    onSelectList: (Long?) -> Unit,
+    onCreateList: () -> Unit,
     exactAlarmsAllowed: Boolean,
     onConfigureExactAlarms: () -> Unit,
     onEditReminder: (Reminder) -> Unit,
@@ -65,45 +80,55 @@ fun HomeScreen(
         floatingActionButton = floatingActionButton,
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        if (reminders.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp),
-            ) {
-                if (!exactAlarmsAllowed) {
-                    ExactAlarmBanner(onConfigure = onConfigureExactAlarms)
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-                EmptyRemindersState(modifier = Modifier.fillMaxSize())
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            ListFilterBar(
+                lists = lists,
+                selectedListId = selectedListId,
+                filterReady = filterReady,
+                onSelectList = onSelectList,
+                onCreateList = onCreateList,
+            )
+            if (!exactAlarmsAllowed) {
+                ExactAlarmBanner(
+                    onConfigure = onConfigureExactAlarms,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(start = 12.dp, end = 4.dp, top = 0.dp, bottom = 72.dp),
-            ) {
-                if (!exactAlarmsAllowed) {
-                    item(key = "exact_alarm_banner") {
-                        ExactAlarmBanner(
-                            onConfigure = onConfigureExactAlarms,
-                            modifier = Modifier.padding(end = 8.dp, bottom = 4.dp, top = 2.dp),
-                        )
-                    }
-                }
-                itemsIndexed(reminders, key = { _, item -> item.id }) { index, reminder ->
-                    CompactReminderRow(
-                        reminder = reminder,
-                        onClick = { selectedReminder = reminder },
-                        onDelete = { onDeleteReminder(reminder) },
+            if (!filterReady) {
+                Spacer(modifier = Modifier.weight(1f))
+            } else if (reminders.isEmpty()) {
+                if (selectedListId == null) {
+                    EmptyRemindersState(modifier = Modifier.fillMaxSize())
+                } else {
+                    Text(
+                        text = "Nenhuma tarefa nesta lista.",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (index < reminders.lastIndex) {
-                        HorizontalDivider(
-                            thickness = 0.5.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 4.dp, top = 0.dp, bottom = 72.dp),
+                ) {
+                    itemsIndexed(reminders, key = { _, item -> item.id }) { index, reminder ->
+                        CompactReminderRow(
+                            reminder = reminder,
+                            listName = lists.firstOrNull { it.id == reminder.listId }?.name.orEmpty(),
+                            onClick = { selectedReminder = reminder },
+                            onDelete = { onDeleteReminder(reminder) },
                         )
+                        if (index < reminders.lastIndex) {
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                            )
+                        }
                     }
                 }
             }
@@ -138,24 +163,26 @@ fun HomeScreen(
 @Composable
 private fun CompactReminderRow(
     reminder: Reminder,
+    listName: String,
     onClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val completed = reminder.triggered || reminder.scheduledAt <= System.currentTimeMillis()
+    val completed = ReminderOrdering.isCompleted(reminder, System.currentTimeMillis())
+    val undated = !completed && reminder.scheduledAt == null
+    val listColor = Color(
+        (0xFF000000L or (if (isSystemInDarkTheme()) ListColors.onDark(listName) else ListColors.rgb(listName)).toLong()),
+    )
     val titleColor = if (completed) {
         MaterialTheme.colorScheme.onSurfaceVariant
     } else {
-        MaterialTheme.colorScheme.onSurface
+        listColor
     }
-    val metaColor = if (completed) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+    val metaColor = if (completed || undated) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (completed) 0.75f else 1f)
     } else {
         MaterialTheme.colorScheme.primary
     }
-    val scheduleText = buildString {
-        append(DateTimeFormatters.formatReminderSchedule(reminder.scheduledAt))
-        reminder.recurrenceType.shortLabelPt?.let { append(" · ").append(it) }
-    }
+    val scheduleText = scheduleLabel(reminder)
 
     Row(
         modifier = Modifier
@@ -228,17 +255,19 @@ private fun ReminderActionsSheet(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = DateTimeFormatters.formatReminderSchedule(reminder.scheduledAt),
+            text = scheduleLabel(reminder),
             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
         )
 
-        SheetActionRow(
-            icon = Icons.Outlined.Snooze,
-            label = "Adiar 1h",
-            onClick = onSnooze,
-        )
+        if (reminder.scheduledAt != null) {
+            SheetActionRow(
+                icon = Icons.Outlined.Snooze,
+                label = "Adiar 1h",
+                onClick = onSnooze,
+            )
+        }
         SheetActionRow(
             icon = Icons.Outlined.Edit,
             label = "Editar",
@@ -342,5 +371,84 @@ private fun ExactAlarmBanner(
                 Text("Ativar")
             }
         }
+    }
+}
+
+@Composable
+private fun ListFilterBar(
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    filterReady: Boolean,
+    onSelectList: (Long?) -> Unit,
+    onCreateList: () -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(lists, key = { it.id }) { list ->
+            FilterChipLabel(
+                label = list.name,
+                selected = selectedListId == list.id,
+                accent = Color(0xFF000000L or ListColors.rgb(list.name).toLong()),
+                onClick = { onSelectList(list.id) },
+            )
+        }
+        item(key = "all") {
+            FilterChipLabel(
+                label = "Todas",
+                selected = filterReady && selectedListId == null,
+                onClick = { onSelectList(null) },
+            )
+        }
+        item(key = "add") {
+            FilterChipLabel(
+                label = "+",
+                selected = false,
+                onClick = onCreateList,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterChipLabel(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    accent: Color? = null,
+) {
+    val background = when {
+        selected && accent != null -> accent
+        selected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val color = when {
+        selected && accent != null -> Color.White
+        selected -> MaterialTheme.colorScheme.onPrimary
+        accent != null -> accent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        text = label,
+        color = color,
+        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+private fun scheduleLabel(reminder: Reminder): String {
+    val scheduledAt = reminder.scheduledAt ?: return "Sem prazo"
+    return buildString {
+        append(DateTimeFormatters.formatReminderSchedule(scheduledAt))
+        reminder.recurrenceType.shortLabelPt?.let { append(" · ").append(it) }
     }
 }

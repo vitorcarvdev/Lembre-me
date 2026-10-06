@@ -25,6 +25,7 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
+                val scheduledAt = reminder.scheduledAt ?: return@launch
                 NotificationHelper.showReminderNotification(context, reminder.id, reminder.message)
 
                 val recurrence = reminder.recurrenceType
@@ -33,7 +34,7 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
                     ReminderScheduler.cancel(context, reminder.id)
                 } else {
                     val nextAt = RecurrenceCalculator.nextOccurrence(
-                        fromMillis = reminder.scheduledAt,
+                        fromMillis = scheduledAt,
                         recurrence = recurrence,
                     )
                     if (nextAt == null) {

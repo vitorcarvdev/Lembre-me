@@ -20,7 +20,8 @@ object ReminderScheduler {
     }
 
     fun schedule(context: Context, reminder: Reminder) {
-        if (reminder.triggered || reminder.scheduledAt <= System.currentTimeMillis()) {
+        val scheduledAt = reminder.scheduledAt ?: return
+        if (reminder.triggered || scheduledAt <= System.currentTimeMillis()) {
             return
         }
         if (!canScheduleExactAlarms(context)) {
@@ -32,7 +33,7 @@ object ReminderScheduler {
 
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            reminder.scheduledAt,
+            scheduledAt,
             pendingIntent,
         )
     }

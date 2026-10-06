@@ -22,8 +22,9 @@ class BootReceiver : BroadcastReceiver() {
                 val now = System.currentTimeMillis()
 
                 active.forEach { reminder ->
+                    val scheduledAt = reminder.scheduledAt ?: return@forEach
                     when {
-                        reminder.scheduledAt > now -> {
+                        scheduledAt > now -> {
                             ReminderScheduler.cancel(context, reminder.id)
                             ReminderScheduler.schedule(context, reminder)
                         }
@@ -33,7 +34,7 @@ class BootReceiver : BroadcastReceiver() {
                         }
                         else -> {
                             val nextAt = RecurrenceCalculator.nextOccurrence(
-                                fromMillis = reminder.scheduledAt,
+                                fromMillis = scheduledAt,
                                 recurrence = reminder.recurrenceType,
                                 nowMillis = now,
                             )

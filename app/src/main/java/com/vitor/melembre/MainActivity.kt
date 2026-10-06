@@ -12,15 +12,19 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -58,11 +62,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vitor.melembre.alarm.ReminderScheduler
 import com.vitor.melembre.data.Recurrence
 import com.vitor.melembre.data.Reminder
+import com.vitor.melembre.localweb.LocalAccessController
+import com.vitor.melembre.localweb.LocalAccessService
+import com.vitor.melembre.localweb.LocalIp
+import com.vitor.melembre.localweb.LocalPin
+import com.vitor.melembre.shortcut.VoiceShortcutHelper
+import com.vitor.melembre.ui.CreateListDialog
 import com.vitor.melembre.ui.HomeScreen
+import com.vitor.melembre.ui.ManageListsScreen
+import com.vitor.melembre.ui.LocalAccessDialog
 import com.vitor.melembre.ui.ReminderFormScreen
 import com.vitor.melembre.ui.ReminderViewModel
 import com.vitor.melembre.ui.VoiceConfirmDialog
 import com.vitor.melembre.ui.combineDateAndTime
+import com.vitor.melembre.ui.defaultListId
 import com.vitor.melembre.ui.initialDateTimeFromReminder
 import com.vitor.melembre.ui.theme.MeLembreTheme
 import com.vitor.melembre.voice.ParsedVoiceReminder
@@ -135,6 +148,7 @@ class MainActivity : ComponentActivity() {
                         viewModel.saveReminder(
                             existing = null,
                             message = parsed.message,
+                            listId = null,
                             scheduledAt = scheduledAt,
                             recurrence = parsed.recurrence,
                         ) { result ->
@@ -151,6 +165,9 @@ class MainActivity : ComponentActivity() {
                                 }
                                 ReminderViewModel.SaveResult.EmptyMessage -> {
                                     voiceError.value = getString(R.string.voice_not_understood)
+                                }
+                                ReminderViewModel.SaveResult.MissingList -> {
+                                    voiceError.value = "Não foi possível salvar o lembrete."
                                 }
                             }
                         }
@@ -210,6 +227,7 @@ class MainActivity : ComponentActivity() {
 private sealed class AppScreen {
     data object Home : AppScreen()
     data class Form(val reminder: Reminder?) : AppScreen()
+    data object ManageLists : AppScreen()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -227,14 +245,23 @@ private fun MeLembreAppContent(
     onRequestExactAlarmSettings: () -> Unit,
 ) {
     val reminders by viewModel.homeReminders.collectAsStateWithLifecycle()
+    val taskLists by viewModel.taskLists.collectAsStateWithLifecycle()
+    val selectedListId by viewModel.selectedListId.collectAsStateWithLifecycle()
+    val filterReady by viewModel.filterReady.collectAsStateWithLifecycle()
     var screen by remember { mutableStateOf<AppScreen>(AppScreen.Home) }
     var formMessage by remember { mutableStateOf("") }
+    var formListId by remember { mutableStateOf<Long?>(null) }
+    var formHasDeadline by remember { mutableStateOf(false) }
     var formDate by remember { mutableStateOf(LocalDate.now()) }
     var formTime by remember { mutableStateOf(LocalTime.now().withSecond(0).withNano(0)) }
     var formRecurrence by remember { mutableStateOf(Recurrence.NONE) }
     var formError by remember { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
+    var showCreateList by remember { mutableStateOf(false) }
+    var listError by remember { mutableStateOf<String?>(null) }
+    var pendingDelete by remember { mutableStateOf<com.vitor.melembre.data.TaskList?>(null) }
+    var pendingDeleteCount by remember { mutableIntStateOf(0) }
     var exactAlarmHintShown by remember { mutableStateOf(false) }
     var pendingConfirm by remember { mutableStateOf<ParsedVoiceReminder?>(null) }
 
@@ -242,6 +269,9 @@ private fun MeLembreAppContent(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val exactAlarmsAllowed = ReminderScheduler.canScheduleExactAlarms(context)
+    var showComputerAccess by remember { mutableStateOf(false) }
+    var savedPin by remember { mutableStateOf(LocalPin.read(context)) }
+    val computerAccess by LocalAccessController.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(voiceTrigger) {
         if (voiceTrigger > 0) {
@@ -279,10 +309,20 @@ private fun MeLembreAppContent(
             AppScreen.Home -> {
                 HomeScreen(
                     reminders = reminders,
+                    lists = taskLists,
+                    selectedListId = selectedListId,
+                    filterReady = filterReady,
+                    onSelectList = viewModel::selectList,
+                    onCreateList = {
+                        listError = null
+                        showCreateList = true
+                    },
                     exactAlarmsAllowed = exactAlarmsAllowed,
                     onConfigureExactAlarms = onRequestExactAlarmSettings,
                     onEditReminder = { reminder ->
                         formMessage = reminder.message
+                        formListId = reminder.listId
+                        formHasDeadline = reminder.scheduledAt != null
                         val (date, time) = initialDateTimeFromReminder(reminder)
                         formDate = date
                         formTime = time
@@ -316,6 +356,22 @@ private fun MeLembreAppContent(
                                         tint = MaterialTheme.colorScheme.primary,
                                     )
                                 }
+                                VoiceShortcutMenu(
+                                    onComputerAccess = { showComputerAccess = true },
+                                    onManageLists = { screen = AppScreen.ManageLists },
+                                    onPinResult = { result ->
+                                        val message = when (result) {
+                                            VoiceShortcutHelper.PinResult.AlreadyPinned ->
+                                                context.getString(R.string.voice_shortcut_already)
+                                            VoiceShortcutHelper.PinResult.Unsupported ->
+                                                context.getString(R.string.voice_shortcut_unsupported)
+                                            VoiceShortcutHelper.PinResult.Requested -> null
+                                        }
+                                        if (message != null) {
+                                            scope.launch { snackbarHostState.showSnackbar(message) }
+                                        }
+                                    },
+                                )
                             },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.background,
@@ -326,6 +382,8 @@ private fun MeLembreAppContent(
                     floatingActionButton = {
                         FloatingActionButton(
                             onClick = {
+                                formListId = defaultListId(taskLists, selectedListId)
+                                formHasDeadline = false
                                 openNewReminderForm(
                                     onMessage = { formMessage = it },
                                     onDate = { formDate = it },
@@ -361,6 +419,18 @@ private fun MeLembreAppContent(
                         formMessage = it
                         formError = null
                     },
+                    lists = taskLists,
+                    selectedListId = formListId,
+                    onListSelected = {
+                        formListId = it
+                        formError = null
+                    },
+                    hasDeadline = formHasDeadline,
+                    onHasDeadlineChange = {
+                        formHasDeadline = it
+                        formError = null
+                        if (!it) formRecurrence = Recurrence.NONE
+                    },
                     selectedDate = formDate,
                     onDateClick = { showDatePicker = true },
                     selectedTime = formTime,
@@ -368,12 +438,17 @@ private fun MeLembreAppContent(
                     recurrence = formRecurrence,
                     onRecurrenceChange = { formRecurrence = it },
                     onSave = {
-                        val scheduledAt = combineDateAndTime(formDate, formTime)
+                        val scheduledAt = if (formHasDeadline) {
+                            combineDateAndTime(formDate, formTime)
+                        } else {
+                            null
+                        }
                         viewModel.saveReminder(
                             existing = current.reminder,
                             message = formMessage,
+                            listId = formListId,
                             scheduledAt = scheduledAt,
-                            recurrence = formRecurrence,
+                            recurrence = if (formHasDeadline) formRecurrence else Recurrence.NONE,
                         ) { result ->
                             when (result) {
                                 ReminderViewModel.SaveResult.Success -> {
@@ -385,6 +460,9 @@ private fun MeLembreAppContent(
                                 }
                                 ReminderViewModel.SaveResult.PastDateTime -> {
                                     formError = "Escolha uma data e horário futuros."
+                                }
+                                ReminderViewModel.SaveResult.MissingList -> {
+                                    formError = "Escolha uma lista."
                                 }
                                 ReminderViewModel.SaveResult.ExactAlarmDenied -> {
                                     formError = "Ative alarmes exatos nas configurações do Android."
@@ -405,6 +483,27 @@ private fun MeLembreAppContent(
                     errorMessage = formError,
                 )
             }
+
+            AppScreen.ManageLists -> {
+                ManageListsScreen(
+                    lists = taskLists,
+                    onBack = { screen = AppScreen.Home },
+                    onRename = { list, name ->
+                        viewModel.renameList(list.id, name) { result ->
+                            listError = listResultMessage(result)
+                            if (listError != null) {
+                                scope.launch { snackbarHostState.showSnackbar(listError!!) }
+                            }
+                        }
+                    },
+                    onRequestDelete = { list ->
+                        viewModel.countTasks(list.id) { count ->
+                            pendingDeleteCount = count
+                            pendingDelete = list
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -417,6 +516,8 @@ private fun MeLembreAppContent(
                 formMessage = parsed.message
                 formDate = parsed.date
                 formTime = parsed.time
+                formHasDeadline = true
+                formListId = defaultListId(taskLists, null)
                 formRecurrence = parsed.recurrence
                 formError = null
                 pendingConfirm = null
@@ -491,6 +592,103 @@ private fun MeLembreAppContent(
             },
         )
     }
+
+    if (showComputerAccess) {
+        LocalAccessDialog(
+            state = computerAccess,
+            pin = savedPin,
+            onDismiss = { showComputerAccess = false },
+            onActivate = {
+                if (computerAccess.active || computerAccess.starting) return@LocalAccessDialog
+                val ip = LocalIp.wifiIpv4(context)
+                if (ip == null) {
+                    LocalAccessController.markUnavailable()
+                } else {
+                    val pin = LocalPin.read(context)
+                    savedPin = pin
+                    LocalAccessController.markStarting()
+                    LocalAccessService.start(context, ip, pin)
+                }
+            },
+            onDeactivate = { LocalAccessService.stop(context) },
+            onChangePin = { newPin ->
+                val saved = LocalPin.save(context, newPin)
+                if (saved) {
+                    savedPin = LocalPin.read(context)
+                    if (computerAccess.active) {
+                        val ip = LocalIp.wifiIpv4(context)
+                        if (ip != null) {
+                            LocalAccessService.start(context, ip, savedPin)
+                        }
+                    }
+                }
+                saved
+            },
+        )
+    }
+
+    if (showCreateList) {
+        CreateListDialog(
+            onDismiss = { showCreateList = false },
+            onCreate = { name ->
+                viewModel.createList(name) { result ->
+                    when (result) {
+                        is ReminderViewModel.ListSaveResult.Success -> {
+                            showCreateList = false
+                            viewModel.selectList(result.id)
+                        }
+                        else -> {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(listResultMessage(result) ?: "Não foi possível criar a lista.")
+                            }
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    pendingDelete?.let { list ->
+        val message = if (pendingDeleteCount == 0) {
+            "Excluir a lista ${list.name}?"
+        } else {
+            "Esta lista possui $pendingDeleteCount tarefas. Elas serão movidas para Lembretes."
+        }
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Excluir lista") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteList(list.id) { result ->
+                        if (result !is ReminderViewModel.ListSaveResult.Success) {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(listResultMessage(result) ?: "Não foi possível excluir a lista.")
+                            }
+                        }
+                    }
+                    pendingDelete = null
+                }) {
+                    Text("Excluir lista")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text("Cancelar")
+                }
+            },
+        )
+    }
+}
+
+private fun listResultMessage(result: ReminderViewModel.ListSaveResult): String? {
+    return when (result) {
+        is ReminderViewModel.ListSaveResult.Success -> null
+        ReminderViewModel.ListSaveResult.EmptyName -> "Digite um nome."
+        ReminderViewModel.ListSaveResult.Duplicate -> "Já existe uma lista com esse nome."
+        ReminderViewModel.ListSaveResult.Protected -> "Esta lista não pode ser alterada."
+        ReminderViewModel.ListSaveResult.Missing -> "Não foi possível salvar a lista."
+    }
 }
 
 private fun openNewReminderForm(
@@ -508,6 +706,51 @@ private fun openNewReminderForm(
     onRecurrence(Recurrence.NONE)
     onErrorClear()
     onScreen(AppScreen.Form(null))
+}
+
+@Composable
+private fun VoiceShortcutMenu(
+    onComputerAccess: () -> Unit,
+    onManageLists: () -> Unit,
+    onPinResult: (VoiceShortcutHelper.PinResult) -> Unit,
+) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.more_options),
+                tint = MaterialTheme.colorScheme.onBackground,
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.voice_shortcut_add)) },
+                onClick = {
+                    expanded = false
+                    onPinResult(VoiceShortcutHelper.requestPin(context))
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.manage_lists)) },
+                onClick = {
+                    expanded = false
+                    onManageLists()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.computer_access)) },
+                onClick = {
+                    expanded = false
+                    onComputerAccess()
+                },
+            )
+        }
+    }
 }
 
 @Composable

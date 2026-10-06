@@ -2,6 +2,7 @@ package com.vitor.melembre.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -15,6 +16,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -23,12 +26,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.vitor.melembre.data.Recurrence
 import com.vitor.melembre.data.Reminder
+import com.vitor.melembre.data.TaskList
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -42,6 +51,11 @@ fun ReminderFormScreen(
     existing: Reminder?,
     message: String,
     onMessageChange: (String) -> Unit,
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    onListSelected: (Long) -> Unit,
+    hasDeadline: Boolean,
+    onHasDeadlineChange: (Boolean) -> Unit,
     selectedDate: LocalDate,
     onDateClick: () -> Unit,
     selectedTime: LocalTime,
@@ -91,38 +105,56 @@ fun ReminderFormScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            FormPickerField(
-                label = "Data",
-                value = dateFormatter.format(selectedDate),
-                onClick = onDateClick,
+            ListPickerField(
+                lists = lists,
+                selectedListId = selectedListId,
+                onListSelected = onListSelected,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            FormPickerField(
-                label = "Hora",
-                value = timeFormatter.format(selectedTime),
-                onClick = onTimeClick,
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = "Repetir",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                Recurrence.entries.forEach { option ->
-                    FilterChip(
-                        selected = recurrence == option,
-                        onClick = { onRecurrenceChange(option) },
-                        label = { Text(option.labelPt) },
-                    )
+            if (hasDeadline) {
+                FormPickerField(
+                    label = "Data",
+                    value = dateFormatter.format(selectedDate),
+                    onClick = onDateClick,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                FormPickerField(
+                    label = "Hora",
+                    value = timeFormatter.format(selectedTime),
+                    onClick = onTimeClick,
+                )
+                TextButton(onClick = { onHasDeadlineChange(false) }) {
+                    Text("Sem prazo")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Repetir",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    Recurrence.entries.forEach { option ->
+                        FilterChip(
+                            selected = recurrence == option,
+                            onClick = { onRecurrenceChange(option) },
+                            label = { Text(option.labelPt) },
+                        )
+                    }
+                }
+            } else {
+                FormPickerField(
+                    label = "Data e hora",
+                    value = "Sem prazo",
+                    onClick = { onHasDeadlineChange(true) },
+                )
+                TextButton(onClick = { onHasDeadlineChange(true) }) {
+                    Text("Definir prazo")
                 }
             }
 
@@ -178,10 +210,42 @@ fun combineDateAndTime(date: LocalDate, time: LocalTime, zoneId: ZoneId = ZoneId
 }
 
 fun initialDateTimeFromReminder(reminder: Reminder?, zoneId: ZoneId = ZoneId.systemDefault()): Pair<LocalDate, LocalTime> {
-    if (reminder == null) {
+    val scheduledAt = reminder?.scheduledAt
+    if (reminder == null || scheduledAt == null) {
         val now = Instant.now().atZone(zoneId)
         return now.toLocalDate() to now.toLocalTime().withSecond(0).withNano(0)
     }
-    val zdt = Instant.ofEpochMilli(reminder.scheduledAt).atZone(zoneId)
-    return zdt.toLocalDate() to zdt.toLocalTime()
+    val zdt = Instant.ofEpochMilli(scheduledAt).atZone(zoneId)
+    return zdt.toLocalDate() to zdt.toLocalTime().withSecond(0).withNano(0)
+}
+
+@Composable
+private fun ListPickerField(
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    onListSelected: (Long) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = lists.firstOrNull { it.id == selectedListId }?.name ?: "Escolher"
+    Box {
+        FormPickerField(
+            label = "Lista",
+            value = selectedName,
+            onClick = { expanded = true },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            lists.forEach { list ->
+                DropdownMenuItem(
+                    text = { Text(list.name) },
+                    onClick = {
+                        expanded = false
+                        onListSelected(list.id)
+                    },
+                )
+            }
+        }
+    }
 }

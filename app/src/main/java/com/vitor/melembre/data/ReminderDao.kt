@@ -24,13 +24,33 @@ interface ReminderDao {
         SELECT * FROM reminders
         ORDER BY
           CASE
-            WHEN triggered = 0 AND scheduledAt > :now THEN 0
-            ELSE 1
+            WHEN triggered = 0 AND scheduledAt IS NOT NULL AND scheduledAt > :now THEN 0
+            WHEN triggered = 0 AND scheduledAt IS NULL THEN 1
+            ELSE 2
           END ASC,
-          scheduledAt ASC
+          CASE WHEN scheduledAt IS NULL THEN 1 ELSE 0 END ASC,
+          scheduledAt ASC,
+          id ASC
         """,
     )
     fun observeHomeList(now: Long = System.currentTimeMillis()): Flow<List<Reminder>>
+
+    @Query(
+        """
+        SELECT * FROM reminders
+        WHERE listId = :listId
+        ORDER BY
+          CASE
+            WHEN triggered = 0 AND scheduledAt IS NOT NULL AND scheduledAt > :now THEN 0
+            WHEN triggered = 0 AND scheduledAt IS NULL THEN 1
+            ELSE 2
+          END ASC,
+          CASE WHEN scheduledAt IS NULL THEN 1 ELSE 0 END ASC,
+          scheduledAt ASC,
+          id ASC
+        """,
+    )
+    fun observeByList(listId: Long, now: Long = System.currentTimeMillis()): Flow<List<Reminder>>
 
     @Query(
         """
@@ -44,7 +64,7 @@ interface ReminderDao {
     @Query(
         """
         SELECT * FROM reminders
-        WHERE triggered = 0
+        WHERE triggered = 0 AND scheduledAt IS NOT NULL
         ORDER BY scheduledAt ASC
         """,
     )
