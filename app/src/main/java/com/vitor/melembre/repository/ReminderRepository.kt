@@ -90,6 +90,7 @@ class ReminderRepository(
         scheduledAt: Long?,
         recurrence: Recurrence,
         listId: Long?,
+        url: String = "",
     ): Result<Long> {
         val resolvedListId = listId ?: remindersListId()
         if (taskListDao.getById(resolvedListId) == null) {
@@ -103,6 +104,8 @@ class ReminderRepository(
             scheduledAt = scheduledAt,
             recurrence = if (scheduledAt == null) Recurrence.NONE.name else recurrence.name,
             listId = resolvedListId,
+            url = url,
+            sortOrder = (dao.maxSortOrder(resolvedListId) ?: 0L) + 1,
         )
         val id = dao.insert(reminder)
         val saved = reminder.copy(id = id)
@@ -118,6 +121,7 @@ class ReminderRepository(
         scheduledAt: Long?,
         recurrence: Recurrence,
         listId: Long,
+        url: String = reminder.url,
     ): Result<Unit> {
         if (taskListDao.getById(listId) == null) {
             return Result.failure(MissingListException())
@@ -132,6 +136,12 @@ class ReminderRepository(
             triggered = false,
             recurrence = if (scheduledAt == null) Recurrence.NONE.name else recurrence.name,
             listId = listId,
+            url = url,
+            sortOrder = if (listId == reminder.listId) {
+                reminder.sortOrder
+            } else {
+                (dao.maxSortOrder(listId) ?: 0L) + 1
+            },
         )
         dao.update(updated)
         if (scheduledAt != null) {
@@ -164,6 +174,42 @@ class ReminderRepository(
         return Result.success(Unit)
     }
 
+    /** Reordena as tarefas informadas dentro da lista, reaproveitando as posições que elas já ocupam. */
+    suspend fun reorder(listId: Long, orderedIds: List<Long>) {
+        val items = orderedIds.distinct().mapNotNull { dao.getById(it) }.filter { it.listId == listId }
+        if (items.size < 2) return
+        val slots = items.map { it.sortOrder }.sorted()
+        val usable = if (slots.zipWithNext().all { (a, b) -> a < b }) slots else items.indices.map { it + 1L }
+        val byId = items.associateBy { it.id }
+        orderedIds.distinct().filter { it in byId }.forEachIndexed { index, id ->
+            dao.setSortOrder(id, listId, usable[index])
+        }
+    }
+
+    suspend fun complete(reminder: Reminder) {
+        ReminderScheduler.cancel(appContext, reminder.id)
+        dao.update(reminder.copy(triggered = true))
+    }
+
+    suspend fun reopen(reminder: Reminder): Result<Unit> {
+        val scheduledAt = reminder.scheduledAt
+        if (scheduledAt == null) {
+            dao.update(reminder.copy(triggered = false))
+            return Result.success(Unit)
+        }
+        if (scheduledAt <= System.currentTimeMillis()) {
+            return Result.failure(PastDeadlineException())
+        }
+        if (!ReminderScheduler.canScheduleExactAlarms(appContext)) {
+            return Result.failure(ExactAlarmNotAllowedException())
+        }
+        val updated = reminder.copy(triggered = false)
+        dao.update(updated)
+        ReminderScheduler.schedule(appContext, updated)
+        return Result.success(Unit)
+    }
+
+    class PastDeadlineException : Exception()
     class ExactAlarmNotAllowedException : Exception()
     class NoDeadlineException : Exception()
     class EmptyListNameException : Exception()

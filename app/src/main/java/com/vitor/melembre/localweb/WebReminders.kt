@@ -75,6 +75,8 @@ object WebReminders {
             append(quoted(time))
             append(",\"schedule\":")
             append(quoted(schedule))
+            append(",\"url\":")
+            append(quoted(reminder.url))
             append(",\"hasDeadline\":")
             append(if (scheduledAt != null) "true" else "false")
             append(",\"completed\":")

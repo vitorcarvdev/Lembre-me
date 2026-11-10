@@ -30,6 +30,7 @@ interface ReminderDao {
           END ASC,
           CASE WHEN scheduledAt IS NULL THEN 1 ELSE 0 END ASC,
           scheduledAt ASC,
+          sortOrder ASC,
           id ASC
         """,
     )
@@ -47,6 +48,7 @@ interface ReminderDao {
           END ASC,
           CASE WHEN scheduledAt IS NULL THEN 1 ELSE 0 END ASC,
           scheduledAt ASC,
+          sortOrder ASC,
           id ASC
         """,
     )
@@ -72,6 +74,12 @@ interface ReminderDao {
 
     @Query("SELECT * FROM reminders WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): Reminder?
+
+    @Query("SELECT MAX(sortOrder) FROM reminders WHERE listId = :listId")
+    suspend fun maxSortOrder(listId: Long): Long?
+
+    @Query("UPDATE reminders SET sortOrder = :sortOrder WHERE id = :id AND listId = :listId")
+    suspend fun setSortOrder(id: Long, listId: Long, sortOrder: Long)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(reminder: Reminder): Long

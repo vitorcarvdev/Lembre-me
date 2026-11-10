@@ -17,8 +17,24 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Menu
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import com.vitor.melembre.util.ListColors
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DatePicker
@@ -48,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,12 +78,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vitor.melembre.alarm.ReminderScheduler
 import com.vitor.melembre.data.Recurrence
+import com.vitor.melembre.focus.FocusStore
+import com.vitor.melembre.ui.FocusScreen
+import com.vitor.melembre.ui.FocusSettingsScreen
 import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.localweb.LocalAccessController
 import com.vitor.melembre.localweb.LocalAccessService
 import com.vitor.melembre.localweb.LocalIp
 import com.vitor.melembre.localweb.LocalPin
-import com.vitor.melembre.shortcut.VoiceShortcutHelper
 import com.vitor.melembre.ui.CreateListDialog
 import com.vitor.melembre.ui.HomeScreen
 import com.vitor.melembre.ui.ManageListsScreen
@@ -228,6 +247,7 @@ private sealed class AppScreen {
     data object Home : AppScreen()
     data class Form(val reminder: Reminder?) : AppScreen()
     data object ManageLists : AppScreen()
+    data object Focus : AppScreen()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -247,6 +267,8 @@ private fun MeLembreAppContent(
     val reminders by viewModel.homeReminders.collectAsStateWithLifecycle()
     val taskLists by viewModel.taskLists.collectAsStateWithLifecycle()
     val selectedListId by viewModel.selectedListId.collectAsStateWithLifecycle()
+    val openCounts by viewModel.openCounts.collectAsStateWithLifecycle()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
     val filterReady by viewModel.filterReady.collectAsStateWithLifecycle()
     var screen by remember { mutableStateOf<AppScreen>(AppScreen.Home) }
     var formMessage by remember { mutableStateOf("") }
@@ -272,6 +294,19 @@ private fun MeLembreAppContent(
     var showComputerAccess by remember { mutableStateOf(false) }
     var savedPin by remember { mutableStateOf(LocalPin.read(context)) }
     val computerAccess by LocalAccessController.state.collectAsStateWithLifecycle()
+    val focusStore = remember { FocusStore(context) }
+    var focusEnabled by remember { mutableStateOf(focusStore.isEnabled()) }
+    var focusOpen by rememberSaveable { mutableStateOf(false) }
+    // O foco só abre sozinho quando o acesso pelo computador é ligado agora (não ao abrir o app,
+    // nem ao girar a tela, nem depois de o usuário sair do foco).
+    var lastAutoFocus by remember { mutableStateOf(computerAccess.active && focusEnabled) }
+
+    LaunchedEffect(computerAccess.active, focusEnabled) {
+        val want = computerAccess.active && focusEnabled
+        if (want && !lastAutoFocus) focusOpen = true
+        if (!computerAccess.active) focusOpen = false
+        lastAutoFocus = want
+    }
 
     LaunchedEffect(voiceTrigger) {
         if (voiceTrigger > 0) {
@@ -307,6 +342,86 @@ private fun MeLembreAppContent(
     ) { _ ->
         when (val current = screen) {
             AppScreen.Home -> {
+                BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
+                            Text(
+                                text = "Lembre-me",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(start = 28.dp, top = 24.dp, bottom = 12.dp),
+                            )
+                            val totalOpen = openCounts.values.sum()
+                            DrawerEntry(
+                                label = "Todas",
+                                selected = filterReady && selectedListId == null,
+                                count = totalOpen,
+                                leading = { Icon(Icons.Filled.Inbox, contentDescription = null) },
+                            ) {
+                                viewModel.selectList(null)
+                                scope.launch { drawerState.close() }
+                            }
+                            HorizontalDivider(Modifier.padding(horizontal = 28.dp, vertical = 6.dp))
+                            taskLists.forEach { list ->
+                                DrawerEntry(
+                                    label = list.name,
+                                    selected = selectedListId == list.id,
+                                    count = openCounts[list.id] ?: 0,
+                                    leading = {
+                                        Box(
+                                            Modifier
+                                                .size(12.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF000000L or ListColors.rgb(list.name).toLong())),
+                                        )
+                                    },
+                                ) {
+                                    viewModel.selectList(list.id)
+                                    scope.launch { drawerState.close() }
+                                }
+                            }
+                            DrawerEntry(
+                                label = "Nova lista",
+                                selected = false,
+                                count = null,
+                                leading = { Icon(Icons.Filled.Add, contentDescription = null) },
+                            ) {
+                                scope.launch { drawerState.close() }
+                                listError = null
+                                showCreateList = true
+                            }
+                            HorizontalDivider(Modifier.padding(horizontal = 28.dp, vertical = 6.dp))
+                            DrawerEntry(
+                                label = "Gerenciar listas",
+                                selected = false,
+                                count = null,
+                                leading = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                            ) {
+                                scope.launch { drawerState.close() }
+                                screen = AppScreen.ManageLists
+                            }
+                            DrawerEntry(
+                                label = "Modo foco",
+                                selected = false,
+                                count = null,
+                                leading = { Icon(Icons.Filled.Timer, contentDescription = null) },
+                            ) {
+                                scope.launch { drawerState.close() }
+                                screen = AppScreen.Focus
+                            }
+                            DrawerEntry(
+                                label = stringResource(R.string.computer_access),
+                                selected = false,
+                                count = null,
+                                leading = { Icon(Icons.Filled.Computer, contentDescription = null) },
+                            ) {
+                                scope.launch { drawerState.close() }
+                                showComputerAccess = true
+                            }
+                        }
+                    },
+                ) {
                 HomeScreen(
                     reminders = reminders,
                     lists = taskLists,
@@ -319,18 +434,24 @@ private fun MeLembreAppContent(
                     },
                     exactAlarmsAllowed = exactAlarmsAllowed,
                     onConfigureExactAlarms = onRequestExactAlarmSettings,
-                    onEditReminder = { reminder ->
-                        formMessage = reminder.message
-                        formListId = reminder.listId
-                        formHasDeadline = reminder.scheduledAt != null
-                        val (date, time) = initialDateTimeFromReminder(reminder)
-                        formDate = date
-                        formTime = time
-                        formRecurrence = reminder.recurrenceType
-                        formError = null
-                        screen = AppScreen.Form(reminder)
+                    onSaveReminder = { reminder, message, listId, scheduledAt, recurrence, url, onResult ->
+                        viewModel.saveReminder(
+                            existing = reminder,
+                            message = message,
+                            listId = listId,
+                            scheduledAt = scheduledAt,
+                            recurrence = recurrence,
+                            onResult = onResult,
+                            url = url,
+                        )
                     },
                     onDeleteReminder = viewModel::deleteReminder,
+                    onReorder = viewModel::reorder,
+                    onToggleCompleted = { reminder ->
+                        viewModel.toggleCompleted(reminder) { message ->
+                            scope.launch { snackbarHostState.showSnackbar(message = message) }
+                        }
+                    },
                     onSnoozeReminder = { reminder ->
                         viewModel.snoozeReminderOneHour(reminder) {
                             scope.launch {
@@ -349,29 +470,33 @@ private fun MeLembreAppContent(
                         CenterAlignedTopAppBar(
                             title = { HomeHeader(compact = reminders.isNotEmpty()) },
                             actions = {
-                                IconButton(onClick = onRequestVoice) {
+                                IconButton(onClick = { focusOpen = true }) {
                                     Icon(
-                                        imageVector = Icons.Filled.Mic,
-                                        contentDescription = stringResource(R.string.voice_reminder),
+                                        imageVector = Icons.Filled.Timer,
+                                        contentDescription = "Entrar no modo foco",
                                         tint = MaterialTheme.colorScheme.primary,
                                     )
                                 }
-                                VoiceShortcutMenu(
-                                    onComputerAccess = { showComputerAccess = true },
-                                    onManageLists = { screen = AppScreen.ManageLists },
-                                    onPinResult = { result ->
-                                        val message = when (result) {
-                                            VoiceShortcutHelper.PinResult.AlreadyPinned ->
-                                                context.getString(R.string.voice_shortcut_already)
-                                            VoiceShortcutHelper.PinResult.Unsupported ->
-                                                context.getString(R.string.voice_shortcut_unsupported)
-                                            VoiceShortcutHelper.PinResult.Requested -> null
-                                        }
-                                        if (message != null) {
-                                            scope.launch { snackbarHostState.showSnackbar(message) }
-                                        }
-                                    },
-                                )
+                                IconButton(onClick = { showComputerAccess = true }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Computer,
+                                        contentDescription = stringResource(R.string.computer_access),
+                                        tint = if (computerAccess.active) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Menu,
+                                        contentDescription = "Abrir menu",
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                    )
+                                }
                             },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.background,
@@ -409,6 +534,7 @@ private fun MeLembreAppContent(
                         }
                     },
                 )
+                }
             }
 
             is AppScreen.Form -> {
@@ -484,6 +610,21 @@ private fun MeLembreAppContent(
                 )
             }
 
+            AppScreen.Focus -> {
+                val focusAgenda = remember { focusStore.load() }
+                FocusSettingsScreen(
+                    enabled = focusEnabled,
+                    onEnabledChange = {
+                        focusEnabled = it
+                        focusStore.setEnabled(it)
+                    },
+                    agenda = focusAgenda,
+                    onSaveAgenda = { focusStore.save(it) },
+                    onOpenNow = { focusOpen = true },
+                    onBack = { screen = AppScreen.Home },
+                )
+            }
+
             AppScreen.ManageLists -> {
                 ManageListsScreen(
                     lists = taskLists,
@@ -505,6 +646,11 @@ private fun MeLembreAppContent(
                 )
             }
         }
+    }
+
+    if (focusOpen) {
+        val agendaNow = remember { focusStore.load() }
+        FocusScreen(agenda = agendaNow, onExit = { focusOpen = false })
     }
 
     pendingConfirm?.let { parsed ->
@@ -709,48 +855,25 @@ private fun openNewReminderForm(
 }
 
 @Composable
-private fun VoiceShortcutMenu(
-    onComputerAccess: () -> Unit,
-    onManageLists: () -> Unit,
-    onPinResult: (VoiceShortcutHelper.PinResult) -> Unit,
+private fun DrawerEntry(
+    label: String,
+    selected: Boolean,
+    count: Int?,
+    leading: @Composable () -> Unit,
+    onClick: () -> Unit,
 ) {
-    val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = stringResource(R.string.more_options),
-                tint = MaterialTheme.colorScheme.onBackground,
-            )
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.voice_shortcut_add)) },
-                onClick = {
-                    expanded = false
-                    onPinResult(VoiceShortcutHelper.requestPin(context))
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.manage_lists)) },
-                onClick = {
-                    expanded = false
-                    onManageLists()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.computer_access)) },
-                onClick = {
-                    expanded = false
-                    onComputerAccess()
-                },
-            )
-        }
-    }
+    NavigationDrawerItem(
+        label = { Text(label) },
+        selected = selected,
+        onClick = onClick,
+        icon = leading,
+        badge = if (count != null && count > 0) {
+            { Text(count.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        } else {
+            null
+        },
+        modifier = Modifier.padding(horizontal = 12.dp),
+    )
 }
 
 @Composable

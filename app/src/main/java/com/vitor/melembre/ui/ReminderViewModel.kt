@@ -9,6 +9,7 @@ import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.data.TaskList
 import com.vitor.melembre.data.TaskListNames
 import com.vitor.melembre.repository.ReminderRepository
+import com.vitor.melembre.util.ReminderOrdering
 import com.vitor.melembre.util.ReminderValidation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -37,6 +39,16 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
     }.flatMapLatest { (ready, listId) ->
         if (!ready) flowOf(emptyList()) else repository.observeHomeList(listId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Tarefas ainda abertas por lista (para os números do menu lateral). */
+    val openCounts = repository.observeHomeList(null)
+        .map { all ->
+            val now = System.currentTimeMillis()
+            all.filter { !ReminderOrdering.isCompleted(it, now) }
+                .groupingBy { it.listId }
+                .eachCount()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     init {
         viewModelScope.launch {
@@ -80,6 +92,7 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
         listId: Long?,
         scheduledAt: Long?,
         recurrence: Recurrence,
+        url: String? = null,
         onResult: (SaveResult) -> Unit,
     ) {
         if (!ReminderValidation.isMessageValid(message)) {
@@ -93,10 +106,10 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             val result = if (existing == null) {
-                repository.add(message, scheduledAt, recurrence, listId).map { Unit }
+                repository.add(message, scheduledAt, recurrence, listId, url.orEmpty()).map { Unit }
             } else {
                 val resolvedListId = listId ?: existing.listId
-                repository.update(existing, message, scheduledAt, recurrence, resolvedListId)
+                repository.update(existing, message, scheduledAt, recurrence, resolvedListId, url ?: existing.url)
             }
 
             result.fold(
@@ -145,6 +158,31 @@ class ReminderViewModel(application: Application) : AndroidViewModel(application
     fun deleteReminder(reminder: Reminder) {
         viewModelScope.launch {
             repository.delete(reminder)
+        }
+    }
+
+    fun reorder(listId: Long, orderedIds: List<Long>) {
+        viewModelScope.launch { repository.reorder(listId, orderedIds) }
+    }
+
+    fun toggleCompleted(reminder: Reminder, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            val reminder = repository.findById(reminder.id) ?: return@launch
+            if (ReminderOrdering.isCompleted(reminder, System.currentTimeMillis())) {
+                repository.reopen(reminder).onFailure { error ->
+                    onError(
+                        when (error) {
+                            is ReminderRepository.PastDeadlineException ->
+                                "O prazo já passou. Edite a data para reabrir."
+                            is ReminderRepository.ExactAlarmNotAllowedException ->
+                                "Ative alarmes exatos para reabrir o lembrete."
+                            else -> "Não foi possível reabrir."
+                        },
+                    )
+                }
+            } else {
+                repository.complete(reminder)
+            }
         }
     }
 

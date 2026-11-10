@@ -46,7 +46,7 @@ class LocalAccessServerTest {
         assertEquals(200, code)
         assertTrue(body.contains("Lembre-me"))
         assertTrue(body.contains("PIN"))
-        assertTrue(body.contains("+ Novo lembrete"))
+        assertTrue(body.contains("Nova tarefa"))
         assertTrue(body.contains("Adiar 1h"))
         assertTrue(body.contains("Excluir"))
         assertTrue(body.contains("line-through"))
@@ -111,6 +111,49 @@ class LocalAccessServerTest {
         val afterDelete = exchange("GET", "/api/reminders", token = token).second
         assertFalse(afterDelete.contains("Pagar internet"))
         assertTrue(afterDelete.contains("Levar documentos"))
+    }
+
+    @Test
+    fun reorderChangesOrderOfUndatedTasksOnly() {
+        val token = unlock()
+        for (name in listOf("Primeira", "Segunda", "Terceira")) {
+            exchange("POST", "/api/reminders", "{\"message\":\"$name\",\"listId\":1,\"date\":\"\",\"time\":\"\"}", token)
+        }
+        fun order(): List<String> {
+            val body = exchange("GET", "/api/reminders?listId=1", token = token).second
+            return listOf("Primeira", "Segunda", "Terceira").sortedBy { body.indexOf(it) }
+        }
+        assertEquals(listOf("Primeira", "Segunda", "Terceira"), order())
+        val ids = memory.items.filter { it.message in setOf("Primeira", "Segunda", "Terceira") }.associate { it.message to it.id }
+        val wanted = listOf(ids.getValue("Terceira"), ids.getValue("Primeira"), ids.getValue("Segunda"))
+        val reordered = exchange(
+            "POST",
+            "/api/reminders/reorder",
+            "{\"listId\":1,\"ids\":\"${wanted.joinToString(",")}\"}",
+            token,
+        )
+        assertEquals(200, reordered.first)
+        assertEquals(listOf("Terceira", "Primeira", "Segunda"), order())
+    }
+
+    @Test
+    fun focusAgendaCanBeReadAndSaved() {
+        val token = unlock()
+        val read = exchange("GET", "/api/focus", token = token)
+        assertEquals(200, read.first)
+        assertTrue(read.second.contains("VitProspect 1"))
+        assertTrue(read.second.contains("12:00|13:00|1|Almoço"))
+
+        val saved = exchange("POST", "/api/focus", "{\"agenda\":\"09:00|10:00|0|Estudo\\n10:00|10:30|1|Café\"}", token)
+        assertEquals(200, saved.first)
+        assertEquals(listOf("Estudo", "Café"), memory.agenda.map { it.name })
+        assertTrue(memory.agenda[1].rest)
+
+        val overlap = exchange("POST", "/api/focus", "{\"agenda\":\"09:00|10:00|0|A\\n09:30|11:00|0|B\"}", token)
+        assertEquals(400, overlap.first)
+        val broken = exchange("POST", "/api/focus", "{\"agenda\":\"lixo\"}", token)
+        assertEquals(400, broken.first)
+        assertEquals(listOf("Estudo", "Café"), memory.agenda.map { it.name })
     }
 
     @Test
@@ -274,7 +317,7 @@ class LocalAccessServerTest {
             .toEpochMilli()
     }
 
-    private class MemoryReminders : LocalReminderActions {
+    private inner class MemoryReminders : LocalReminderActions {
         val items = mutableListOf<Reminder>()
         val lists = mutableListOf(
             TaskList(id = 1, name = "Lembretes", isDefault = true, createdAt = 1),
@@ -288,13 +331,15 @@ class LocalAccessServerTest {
 
         override suspend fun list(): List<Reminder> = items.toList()
 
-        override suspend fun add(message: String, scheduledAt: Long?, listId: Long): Result<Long> {
+        override suspend fun add(message: String, scheduledAt: Long?, listId: Long, url: String): Result<Long> {
             val id = nextId++
             items += Reminder(
                 id = id,
                 message = message.trim(),
                 scheduledAt = scheduledAt,
                 listId = listId,
+                url = url,
+                sortOrder = id,
             )
             return Result.success(id)
         }
@@ -304,6 +349,7 @@ class LocalAccessServerTest {
             message: String,
             scheduledAt: Long?,
             listId: Long,
+            url: String,
         ): Result<Unit> {
             val index = items.indexOfFirst { it.id == id }
             if (index < 0) return Result.failure(LocalAccessFailure.Missing())
@@ -313,6 +359,7 @@ class LocalAccessServerTest {
                 scheduledAt = scheduledAt,
                 triggered = false,
                 listId = listId,
+                url = url,
             )
             return Result.success(Unit)
         }
@@ -322,7 +369,7 @@ class LocalAccessServerTest {
             if (index < 0) return Result.failure(LocalAccessFailure.Missing())
             val current = items[index]
             val currentTime = current.scheduledAt ?: return Result.failure(LocalAccessFailure.NoDeadline())
-            val newTime = maxOf(System.currentTimeMillis(), currentTime) + 60 * 60 * 1000L
+            val newTime = maxOf(nowMillis, currentTime) + 60 * 60 * 1000L
             items[index] = current.copy(scheduledAt = newTime, triggered = false)
             return Result.success(Unit)
         }
@@ -330,6 +377,35 @@ class LocalAccessServerTest {
         override suspend fun delete(id: Long): Result<Unit> {
             val removed = items.removeAll { it.id == id }
             return if (removed) Result.success(Unit) else Result.failure(LocalAccessFailure.Missing())
+        }
+
+        var agenda: List<com.vitor.melembre.focus.FocusBlock> = com.vitor.melembre.focus.FocusSchedule.DEFAULT
+
+        override fun focusAgenda() = agenda
+
+        override fun saveFocusAgenda(blocks: List<com.vitor.melembre.focus.FocusBlock>) {
+            agenda = blocks
+        }
+
+        override suspend fun reorder(listId: Long, orderedIds: List<Long>): Result<Unit> {
+            val moved = orderedIds.mapNotNull { id -> items.firstOrNull { it.id == id && it.listId == listId } }
+            val slots = moved.map { it.sortOrder }.sorted()
+            moved.forEachIndexed { i, r ->
+                val index = items.indexOfFirst { it.id == r.id }
+                items[index] = r.copy(sortOrder = slots[i])
+            }
+            return Result.success(Unit)
+        }
+
+        override suspend fun complete(id: Long): Result<Unit> = setTriggered(id, true)
+
+        override suspend fun reopen(id: Long): Result<Unit> = setTriggered(id, false)
+
+        private fun setTriggered(id: Long, value: Boolean): Result<Unit> {
+            val index = items.indexOfFirst { it.id == id }
+            if (index < 0) return Result.failure(LocalAccessFailure.Missing())
+            items[index] = items[index].copy(triggered = value)
+            return Result.success(Unit)
         }
     }
 }

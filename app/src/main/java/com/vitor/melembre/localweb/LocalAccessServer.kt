@@ -1,5 +1,7 @@
 package com.vitor.melembre.localweb
 
+import com.vitor.melembre.focus.FocusSchedule
+import com.vitor.melembre.util.ReminderUrl
 import com.vitor.melembre.util.ReminderValidation
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +20,8 @@ class LocalAccessServer(
     private val gate = LocalAccessGate(pin)
     private val reminderPath = Regex("^/api/reminders/(\\d+)$")
     private val snoozePath = Regex("^/api/reminders/(\\d+)/snooze$")
+    private val completePath = Regex("^/api/reminders/(\\d+)/complete$")
+    private val reopenPath = Regex("^/api/reminders/(\\d+)/reopen$")
 
     override fun serve(session: IHTTPSession): Response {
         val method = session.method
@@ -35,6 +39,17 @@ class LocalAccessServer(
                 method == Method.POST && snoozePath.matches(path) -> {
                     val id = snoozePath.find(path)!!.groupValues[1].toLong()
                     guarded(session) { mutate { actions.snoozeOneHour(id) } }
+                }
+                method == Method.GET && path == "/api/focus" -> guarded(session) { focusAgendaResponse() }
+                method == Method.POST && path == "/api/focus" -> guarded(session) { saveFocusAgenda(session) }
+                method == Method.POST && path == "/api/reminders/reorder" -> guarded(session) { reorder(session) }
+                method == Method.POST && completePath.matches(path) -> {
+                    val id = completePath.find(path)!!.groupValues[1].toLong()
+                    guarded(session) { mutate { actions.complete(id) } }
+                }
+                method == Method.POST && reopenPath.matches(path) -> {
+                    val id = reopenPath.find(path)!!.groupValues[1].toLong()
+                    guarded(session) { mutate { actions.reopen(id) } }
                 }
                 method == Method.DELETE && reminderPath.matches(path) -> {
                     val id = reminderPath.find(path)!!.groupValues[1].toLong()
@@ -70,6 +85,26 @@ class LocalAccessServer(
         )
     }
 
+    private fun focusAgendaResponse(): Response {
+        val text = FocusSchedule.encode(actions.focusAgenda())
+        return json(Response.Status.OK, "{\"agenda\":\"${MiniJson.escape(text)}\"}")
+    }
+
+    private fun saveFocusAgenda(session: IHTTPSession): Response {
+        val fields = readFields(session) ?: return badRequest("Não foi possível salvar a agenda.")
+        val blocks = FocusSchedule.decode(fields["agenda"].orEmpty()) ?: return badRequest("Agenda inválida.")
+        FocusSchedule.validate(blocks)?.let { return badRequest(it) }
+        actions.saveFocusAgenda(blocks)
+        return json(Response.Status.OK, "{\"ok\":true}")
+    }
+
+    private fun reorder(session: IHTTPSession): Response {
+        val fields = readFields(session) ?: return badRequest("Não foi possível reordenar.")
+        val listId = fields["listId"]?.toLongOrNull() ?: return badRequest("Escolha uma lista.")
+        val ids = fields["ids"].orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }
+        return mutate { actions.reorder(listId, ids) }
+    }
+
     private fun create(session: IHTTPSession): Response {
         val fields = readFields(session) ?: return badRequest("Não foi possível salvar.")
         return save(null, fields)
@@ -86,6 +121,7 @@ class LocalAccessServer(
             return badRequest("Digite uma mensagem.")
         }
         val listId = fields["listId"]?.toLongOrNull() ?: return badRequest("Escolha uma lista.")
+        val url = ReminderUrl.normalize(fields["url"]) ?: return badRequest("URL inválida.")
         val date = fields["date"].orEmpty().trim()
         val time = fields["time"].orEmpty().trim()
         val scheduledAt = when {
@@ -99,9 +135,9 @@ class LocalAccessServer(
         }
         return mutate {
             if (existingId == null) {
-                actions.add(message, scheduledAt, listId)
+                actions.add(message, scheduledAt, listId, url)
             } else {
-                actions.update(existingId, message, scheduledAt, listId)
+                actions.update(existingId, message, scheduledAt, listId, url)
             }
         }
     }
@@ -121,6 +157,7 @@ class LocalAccessServer(
                         errorBody("Ative alarmes exatos nas configurações do Android."),
                     )
                     is LocalAccessFailure.NoDeadline -> badRequest("Esta tarefa não tem prazo.")
+                    is LocalAccessFailure.PastDeadline -> badRequest("O prazo já passou. Edite a data para reabrir.")
                     else -> badRequest("Não foi possível salvar.")
                 }
             },

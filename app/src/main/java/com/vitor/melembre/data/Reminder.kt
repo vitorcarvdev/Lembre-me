@@ -25,6 +25,8 @@ data class Reminder(
     val triggered: Boolean = false,
     val recurrence: String = Recurrence.NONE.name,
     val listId: Long = 0,
+    val url: String = "",
+    val sortOrder: Long = 0,
 ) {
     val recurrenceType: Recurrence
         get() = Recurrence.fromStorage(recurrence)

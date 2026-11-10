@@ -4,7 +4,7 @@ import android.app.Application
 import com.vitor.melembre.data.AppDatabase
 import com.vitor.melembre.notification.NotificationHelper
 import com.vitor.melembre.repository.ReminderRepository
-import com.vitor.melembre.shortcut.VoiceShortcutHelper
+import androidx.core.content.pm.ShortcutManagerCompat
 
 class MeLembreApp : Application() {
     val database: AppDatabase by lazy { AppDatabase.getInstance(this) }
@@ -15,6 +15,7 @@ class MeLembreApp : Application() {
     override fun onCreate() {
         super.onCreate()
         NotificationHelper.createChannel(this)
-        VoiceShortcutHelper.publishDynamicShortcut(this)
+        // Atalho de voz desativado: remove o que versões anteriores publicaram.
+        runCatching { ShortcutManagerCompat.removeAllDynamicShortcuts(this) }
     }
 }

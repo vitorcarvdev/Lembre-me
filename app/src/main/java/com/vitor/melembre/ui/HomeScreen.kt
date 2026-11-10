@@ -3,7 +3,16 @@ package com.vitor.melembre.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.ui.platform.LocalUriHandler
+import com.vitor.melembre.data.Recurrence
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,11 +24,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.NotificationsNone
@@ -36,6 +49,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.outlined.DragIndicator
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,14 +88,55 @@ fun HomeScreen(
     onCreateList: () -> Unit,
     exactAlarmsAllowed: Boolean,
     onConfigureExactAlarms: () -> Unit,
-    onEditReminder: (Reminder) -> Unit,
+    onSaveReminder: (
+        Reminder,
+        String,
+        Long,
+        Long?,
+        Recurrence,
+        String,
+        (ReminderViewModel.SaveResult) -> Unit,
+    ) -> Unit,
     onDeleteReminder: (Reminder) -> Unit,
     onSnoozeReminder: (Reminder) -> Unit,
+    onToggleCompleted: (Reminder) -> Unit,
+    onReorder: (Long, List<Long>) -> Unit,
     topBar: @Composable () -> Unit,
     floatingActionButton: @Composable () -> Unit,
 ) {
     var selectedReminder by remember { mutableStateOf<Reminder?>(null) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    var working by remember { mutableStateOf(reminders) }
+    var draggingId by remember { mutableStateOf<Long?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val canReorder = selectedListId != null
+    LaunchedEffect(reminders) { if (draggingId == null) working = reminders }
+
+    fun moveDragged(id: Long, dy: Float) {
+        dragOffset += dy
+        val infos = listState.layoutInfo.visibleItemsInfo
+        val cur = infos.firstOrNull { it.key == id } ?: return
+        val curIdx = working.indexOfFirst { it.id == id }
+        if (cur.index != curIdx) return
+        val center = cur.offset + cur.size / 2f + dragOffset
+        val target = infos.firstOrNull { it.key != id && center >= it.offset && center <= it.offset + it.size } ?: return
+        val tIdx = working.indexOfFirst { it.id == target.key }
+        val t = working.getOrNull(tIdx) ?: return
+        if (t.scheduledAt != null || t.triggered) return
+        val moved = working.toMutableList()
+        moved.add(tIdx, moved.removeAt(curIdx))
+        working = moved
+        val newOffset = if (tIdx > curIdx) target.offset + target.size - cur.size else target.offset
+        dragOffset += (cur.offset - newOffset).toFloat()
+    }
+
+    fun finishDrag() {
+        val listId = selectedListId
+        val ids = working.filter { it.scheduledAt == null && !it.triggered }.map { it.id }
+        draggingId = null
+        dragOffset = 0f
+        if (listId != null) onReorder(listId, ids)
+    }
 
     Scaffold(
         topBar = topBar,
@@ -113,21 +176,43 @@ fun HomeScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 12.dp, end = 4.dp, top = 0.dp, bottom = 72.dp),
+                    contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 72.dp),
                 ) {
-                    itemsIndexed(reminders, key = { _, item -> item.id }) { index, reminder ->
-                        CompactReminderRow(
-                            reminder = reminder,
-                            listName = lists.firstOrNull { it.id == reminder.listId }?.name.orEmpty(),
-                            onClick = { selectedReminder = reminder },
-                            onDelete = { onDeleteReminder(reminder) },
+                    itemsIndexed(working, key = { _, item -> item.id }) { index, reminder ->
+                        val corner = 16.dp
+                        val shape = RoundedCornerShape(
+                            topStart = if (index == 0) corner else 0.dp,
+                            topEnd = if (index == 0) corner else 0.dp,
+                            bottomStart = if (index == working.lastIndex) corner else 0.dp,
+                            bottomEnd = if (index == working.lastIndex) corner else 0.dp,
                         )
-                        if (index < reminders.lastIndex) {
-                            HorizontalDivider(
-                                thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        val isDragging = draggingId == reminder.id
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (isDragging) Modifier.zIndex(1f).graphicsLayer { translationY = dragOffset } else Modifier)
+                                .clip(shape)
+                                .background(MaterialTheme.colorScheme.surface),
+                        ) {
+                            CompactReminderRow(
+                                reminder = reminder,
+                                listName = lists.firstOrNull { it.id == reminder.listId }?.name.orEmpty(),
+                                onClick = { selectedReminder = reminder },
+                                onToggle = { onToggleCompleted(reminder) },
+                                onDelete = { onDeleteReminder(reminder) },
+                                reserveHandle = canReorder,
+                                onDragStart = { draggingId = reminder.id; dragOffset = 0f },
+                                onDragMove = { dy -> moveDragged(reminder.id, dy) },
+                                onDragEnd = { finishDrag() },
                             )
+                            if (index < working.lastIndex) {
+                                HorizontalDivider(
+                                    thickness = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                                )
+                            }
                         }
                     }
                 }
@@ -136,27 +221,17 @@ fun HomeScreen(
     }
 
     selectedReminder?.let { reminder ->
-        ModalBottomSheet(
-            onDismissRequest = { selectedReminder = null },
-            sheetState = sheetState,
-        ) {
-            ReminderActionsSheet(
-                reminder = reminder,
-                onSnooze = {
-                    onSnoozeReminder(reminder)
-                    selectedReminder = null
-                },
-                onEdit = {
-                    onEditReminder(reminder)
-                    selectedReminder = null
-                },
-                onDelete = {
-                    onDeleteReminder(reminder)
-                    selectedReminder = null
-                },
-                onCancel = { selectedReminder = null },
-            )
-        }
+        ReminderEditorSheet(
+            reminder = reminder,
+            lists = lists,
+            onDismiss = { selectedReminder = null },
+            onSave = { message, listId, scheduledAt, recurrence, url, onResult ->
+                onSaveReminder(reminder, message, listId, scheduledAt, recurrence, url, onResult)
+            },
+            onToggleCompleted = { onToggleCompleted(reminder) },
+            onSnooze = { onSnoozeReminder(reminder) },
+            onDelete = { onDeleteReminder(reminder) },
+        )
     }
 }
 
@@ -165,37 +240,98 @@ private fun CompactReminderRow(
     reminder: Reminder,
     listName: String,
     onClick: () -> Unit,
+    onToggle: () -> Unit,
     onDelete: () -> Unit,
+    reserveHandle: Boolean,
+    onDragStart: () -> Unit,
+    onDragMove: (Float) -> Unit,
+    onDragEnd: () -> Unit,
 ) {
     val completed = ReminderOrdering.isCompleted(reminder, System.currentTimeMillis())
     val undated = !completed && reminder.scheduledAt == null
+    val dark = isSystemInDarkTheme()
     val listColor = Color(
-        (0xFF000000L or (if (isSystemInDarkTheme()) ListColors.onDark(listName) else ListColors.rgb(listName)).toLong()),
+        (0xFF000000L or (if (dark) ListColors.onDark(listName) else ListColors.rgb(listName)).toLong()),
     )
     val titleColor = if (completed) {
         MaterialTheme.colorScheme.onSurfaceVariant
     } else {
-        listColor
+        MaterialTheme.colorScheme.onSurface
     }
     val metaColor = if (completed || undated) {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (completed) 0.75f else 1f)
     } else {
         MaterialTheme.colorScheme.primary
     }
-    val scheduleText = scheduleLabel(reminder)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp, max = 60.dp)
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
-            .padding(start = 4.dp, end = 0.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (reserveHandle) {
+            if (undated) {
+                val startCb by rememberUpdatedState(onDragStart)
+                val moveCb by rememberUpdatedState(onDragMove)
+                val endCb by rememberUpdatedState(onDragEnd)
+                Icon(
+                    imageVector = Icons.Outlined.DragIndicator,
+                    contentDescription = "Arrastar para reordenar",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier
+                        .size(width = 22.dp, height = 36.dp)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { startCb() },
+                                onDragEnd = { endCb() },
+                                onDragCancel = { endCb() },
+                            ) { change, amount ->
+                                change.consume()
+                                moveCb(amount.y)
+                            }
+                        },
+                )
+            } else {
+                Spacer(modifier = Modifier.width(22.dp))
+            }
+        }
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .then(
+                        if (completed) {
+                            Modifier.background(MaterialTheme.colorScheme.primary)
+                        } else {
+                            Modifier.border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (completed) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = "Reabrir",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(end = 4.dp),
+                .padding(start = 4.dp, end = 4.dp),
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
@@ -203,117 +339,62 @@ private fun CompactReminderRow(
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontSize = 15.sp,
                     lineHeight = 18.sp,
+                    fontWeight = if (completed) FontWeight.Normal else FontWeight.Medium,
                 ),
                 color = titleColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 textDecoration = if (completed) TextDecoration.LineThrough else null,
             )
-            Text(
-                text = scheduleText,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 12.sp,
-                    lineHeight = 14.sp,
-                ),
-                color = metaColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!reserveHandle) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(listColor),
+                    )
+                } else if (!undated) {
+                    Icon(
+                        imageVector = Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                        tint = metaColor,
+                        modifier = Modifier.size(12.dp),
+                    )
+                }
+                Text(
+                    text = scheduleLabel(reminder),
+                    modifier = Modifier.padding(start = if (!reserveHandle || !undated) 5.dp else 0.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
+                    ),
+                    color = metaColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        IconButton(
-            onClick = onDelete,
-            modifier = Modifier.size(36.dp),
-        ) {
+        if (reminder.url.isNotBlank()) {
+            val uriHandler = LocalUriHandler.current
+            IconButton(
+                onClick = { runCatching { uriHandler.openUri(reminder.url) } },
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Link,
+                    contentDescription = "Abrir link",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
             Icon(
                 imageVector = Icons.Outlined.Delete,
                 contentDescription = "Excluir lembrete",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.size(18.dp),
             )
         }
-    }
-}
-
-@Composable
-private fun ReminderActionsSheet(
-    reminder: Reminder,
-    onSnooze: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        Text(
-            text = reminder.message,
-            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp, lineHeight = 20.sp),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = scheduleLabel(reminder),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
-        )
-
-        if (reminder.scheduledAt != null) {
-            SheetActionRow(
-                icon = Icons.Outlined.Snooze,
-                label = "Adiar 1h",
-                onClick = onSnooze,
-            )
-        }
-        SheetActionRow(
-            icon = Icons.Outlined.Edit,
-            label = "Editar",
-            onClick = onEdit,
-        )
-        SheetActionRow(
-            icon = Icons.Outlined.Delete,
-            label = "Excluir",
-            onClick = onDelete,
-        )
-        TextButton(
-            onClick = onCancel,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-        ) {
-            Text("Cancelar")
-        }
-    }
-}
-
-@Composable
-private fun SheetActionRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.size(22.dp),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
     }
 }
 
@@ -382,36 +463,28 @@ private fun ListFilterBar(
     onSelectList: (Long?) -> Unit,
     onCreateList: () -> Unit,
 ) {
-    LazyRow(
+    val current = lists.firstOrNull { it.id == selectedListId }
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(40.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .height(40.dp)
+            .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(lists, key = { it.id }) { list ->
-            FilterChipLabel(
-                label = list.name,
-                selected = selectedListId == list.id,
-                accent = Color(0xFF000000L or ListColors.rgb(list.name).toLong()),
-                onClick = { onSelectList(list.id) },
+        if (current != null) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF000000L or ListColors.rgb(current.name).toLong())),
             )
+            Spacer(Modifier.width(8.dp))
         }
-        item(key = "all") {
-            FilterChipLabel(
-                label = "Todas",
-                selected = filterReady && selectedListId == null,
-                onClick = { onSelectList(null) },
-            )
-        }
-        item(key = "add") {
-            FilterChipLabel(
-                label = "+",
-                selected = false,
-                onClick = onCreateList,
-            )
-        }
+        Text(
+            text = if (!filterReady || current == null) "Todas" else current.name,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.titleMedium,
+        )
     }
 }
 
@@ -420,29 +493,41 @@ private fun FilterChipLabel(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
-    accent: Color? = null,
+    dot: Color? = null,
 ) {
-    val background = when {
-        selected && accent != null -> accent
-        selected -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val color = when {
-        selected && accent != null -> Color.White
-        selected -> MaterialTheme.colorScheme.onPrimary
-        accent != null -> accent
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Text(
-        text = label,
-        color = color,
-        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+    val background = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+    val color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(background)
+            .then(
+                if (selected) Modifier else Modifier.border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant,
+                    RoundedCornerShape(10.dp),
+                ),
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    )
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (dot != null) {
+            Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .then(if (selected) Modifier.border(1.5.dp, Color.White, CircleShape) else Modifier)
+                    .clip(CircleShape)
+                    .background(dot),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(
+            text = label,
+            color = color,
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+        )
+    }
 }
 
 private fun scheduleLabel(reminder: Reminder): String {

@@ -13,6 +13,7 @@ object ReminderOrdering {
             compareBy<Reminder> { group(it, nowMillis) }
                 .thenBy { if (it.scheduledAt == null) 1 else 0 }
                 .thenBy { it.scheduledAt ?: Long.MAX_VALUE }
+                .thenBy { it.sortOrder }
                 .thenBy { it.id },
         )
     }

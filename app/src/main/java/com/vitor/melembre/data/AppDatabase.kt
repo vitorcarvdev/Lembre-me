@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Reminder::class, TaskList::class], version = 3, exportSchema = false)
+@Database(entities = [Reminder::class, TaskList::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun reminderDao(): ReminderDao
 
@@ -70,6 +70,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE reminders ADD COLUMN url TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE reminders ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE reminders SET sortOrder = id")
+            }
+        }
+
         private val seedCallback = object : Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 seedDefaultTaskLists(db)
@@ -103,7 +116,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context, name: String, allowMainThread: Boolean = false): AppDatabase {
             val builder = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .addCallback(seedCallback)
             if (allowMainThread) builder.allowMainThreadQueries()
             return builder.build()
