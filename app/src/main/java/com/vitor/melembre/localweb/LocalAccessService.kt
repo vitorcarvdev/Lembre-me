@@ -8,18 +8,41 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.vitor.melembre.MainActivity
 import com.vitor.melembre.MeLembreApp
 import com.vitor.melembre.R
 import com.vitor.melembre.focus.FocusStore
+import kotlin.concurrent.thread
 
 class LocalAccessService : Service() {
     private var server: LocalAccessServer? = null
     private var inForeground = false
+
+    // Estado do acesso ativo: usado para recriar o servidor sozinho se ele cair
+    private var running = false
+    private var checking = false
+    private var currentHost = ""
+    private var currentPin = ""
+    private val handler = Handler(Looper.getMainLooper())
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private val watchdog = object : Runnable {
+        override fun run() {
+            verifyAsync()
+            handler.postDelayed(this, WATCHDOG_MS)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -35,8 +58,7 @@ class LocalAccessService : Service() {
     }
 
     override fun onDestroy() {
-        server?.stop()
-        server = null
+        releaseResources()
         val current = LocalAccessController.state.value
         if (current.active || current.starting) {
             LocalAccessController.markOff()
@@ -55,30 +77,127 @@ class LocalAccessService : Service() {
             failStart("Não foi possível abrir o acesso na rede.")
             return
         }
-        try {
+        currentHost = host
+        currentPin = pin
+        if (!launchServer()) {
+            failStart("Não foi possível abrir o acesso na rede.")
+            return
+        }
+        running = true
+        acquireWifiLock()
+        watchNetwork()
+        handler.removeCallbacks(watchdog)
+        handler.postDelayed(watchdog, WATCHDOG_MS)
+    }
+
+    /**
+     * Sobe o servidor em todas as interfaces (0.0.0.0). Antes ele ficava preso ao IP do Wi-Fi do
+     * momento: quando o Wi-Fi renegociava, o Android derrubava o socket, o servidor morria e a
+     * thread dele ficava girando a 100% de CPU sem atender ninguém.
+     */
+    private fun launchServer(): Boolean {
+        return try {
             server?.stop()
             server = null
             val actions = RepositoryReminderActions((application as MeLembreApp).reminderRepository, FocusStore(this))
-            val next = LocalAccessServer(host, LocalAccessController.PORT, pin, actions)
+            val next = LocalAccessServer(LocalAccessHealth.ANY_HOST, LocalAccessController.PORT, currentPin, actions)
             next.start()
             server = next
-            LocalAccessController.markOn("http://$host:${LocalAccessController.PORT}", pin)
+            LocalAccessController.markOn("http://$currentHost:${LocalAccessController.PORT}", currentPin)
+            true
         } catch (_: Exception) {
-            failStart("Não foi possível abrir o acesso na rede.")
+            false
         }
     }
 
-    private fun failStart(message: String) {
+    /** Vigia leve: uma conexão local rápida; só recria o servidor se ele realmente não responder. */
+    private fun verifyAsync() {
+        if (!running || checking) return
+        checking = true
+        thread(name = "LocalAccessHealth", isDaemon = true) {
+            val healthy = LocalAccessHealth.isListening(LocalAccessController.PORT)
+            handler.post {
+                checking = false
+                if (running && !healthy) {
+                    launchServer()
+                }
+            }
+        }
+    }
+
+    private fun watchNetwork() {
+        if (networkCallback != null) return
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                handler.post { onNetworkChanged() }
+            }
+
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                handler.post { onNetworkChanged() }
+            }
+        }
+        try {
+            manager.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (_: Exception) {
+            // sem o aviso de rede, o vigia periódico continua cuidando do servidor
+        }
+    }
+
+    private fun onNetworkChanged() {
+        if (!running) return
+        val ip = LocalIp.wifiIpv4(this)
+        if (ip != null && ip != currentHost) {
+            currentHost = ip
+            LocalAccessController.markOn("http://$currentHost:${LocalAccessController.PORT}", currentPin)
+        }
+        verifyAsync()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun acquireWifiLock() {
+        if (wifiLock?.isHeld == true) return
+        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        try {
+            val lock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "melembre:acesso-local")
+            lock.setReferenceCounted(false)
+            lock.acquire()
+            wifiLock = lock
+        } catch (_: Exception) {
+            // sem o lock o acesso funciona, só pode ficar mais lento com a tela apagada
+        }
+    }
+
+    private fun releaseResources() {
+        running = false
+        checking = false
+        handler.removeCallbacksAndMessages(null)
+        networkCallback?.let { callback ->
+            try {
+                getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback)
+            } catch (_: Exception) {
+            }
+        }
+        networkCallback = null
+        try {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (_: Exception) {
+        }
+        wifiLock = null
         server?.stop()
         server = null
+    }
+
+    private fun failStart(message: String) {
+        releaseResources()
         LocalAccessController.markError(message)
         leaveForeground()
         stopSelf()
     }
 
     private fun stopAccess() {
-        server?.stop()
-        server = null
+        releaseResources()
         LocalAccessController.markOff()
         leaveForeground()
         stopSelf()
@@ -149,6 +268,7 @@ class LocalAccessService : Service() {
     companion object {
         private const val CHANNEL_ID = "acesso_local"
         private const val NOTIFICATION_ID = 8765
+        private const val WATCHDOG_MS = 30_000L
         private const val ACTION_START = "com.vitor.melembre.localweb.START"
         private const val ACTION_STOP = "com.vitor.melembre.localweb.STOP"
         private const val EXTRA_HOST = "host"
