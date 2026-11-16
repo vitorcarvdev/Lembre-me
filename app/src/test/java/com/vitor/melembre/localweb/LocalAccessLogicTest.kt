@@ -119,6 +119,28 @@ class LocalAccessLogicTest {
         assertFalse(ReminderOrdering.isCompleted(undated, now))
     }
 
+    @Test
+    fun payloadCountsOpenTasksPerListForTheSideColumn() {
+        val now = at(2026, 10, 5, 12, 0)
+        val lists = listOf(
+            TaskList(id = 1, name = "Lembretes", isDefault = true, createdAt = 1),
+            TaskList(id = 2, name = "Trabalho", isDefault = false, createdAt = 2),
+        )
+        val items = listOf(
+            Reminder(id = 1, message = "A", scheduledAt = at(2026, 10, 5, 18, 0), listId = 1),
+            Reminder(id = 2, message = "B", scheduledAt = null, listId = 1),
+            Reminder(id = 3, message = "C", scheduledAt = at(2026, 10, 4, 10, 0), triggered = true, listId = 1),
+            Reminder(id = 4, message = "D", scheduledAt = at(2026, 10, 6, 9, 0), listId = 2),
+        )
+        val json = WebReminders.remindersPayload(items, lists, now, zone)
+        assertTrue(json.contains("\"name\":\"Lembretes\",\"isDefault\":true,\"color\":\"#6C3CE9\",\"open\":2"))
+        assertTrue(json.contains("\"name\":\"Trabalho\"") && json.contains("\"open\":1}"))
+        assertTrue(json.contains("\"openTotal\":3"))
+        // filtrar uma lista não muda as contagens da coluna lateral
+        val filtered = WebReminders.remindersPayload(items, lists, now, zone, listFilter = 2L)
+        assertTrue(filtered.contains("\"openTotal\":3"))
+    }
+
     private class MemoryPinPreferences : PinPreferences {
         private val values = HashMap<String, String>()
 

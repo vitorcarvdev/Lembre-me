@@ -36,7 +36,7 @@ object LocalAccessPage {
     background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%) fixed;
     color: var(--text);
   }
-  main { max-width: 760px; margin: 0 auto; padding: 28px 18px 56px; }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px 18px 56px; }
   svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   button, input, select { font: inherit; color: inherit; }
   button { cursor: pointer; }
@@ -66,33 +66,55 @@ object LocalAccessPage {
   .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
   .toggle input:checked + .sw { background: var(--accent); }
   .toggle input:checked + .sw::after { left: 23px; }
-  #filters { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 2px; }
-  .chip { border: 1px solid var(--border); background: var(--card); color: var(--text); padding: 7px 14px; white-space: nowrap; font-size: 14px; border-radius: 10px; display: inline-flex; align-items: center; gap: 8px; }
-  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 20px; align-items: start; }
+  #side { position: sticky; top: 20px; background: var(--card); border-radius: 16px; padding: 12px 10px; }
+  .side-actions { display: flex; flex-direction: column; gap: 8px; padding: 2px 2px 12px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .side-actions button { width: 100%; justify-content: center; }
+  .side-title { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 6px 12px 8px; }
+  #filters { display: flex; flex-direction: column; gap: 2px; }
+  .chip { border: 0; background: transparent; color: var(--text); padding: 10px 12px; width: 100%; text-align: left; white-space: nowrap; font-size: 15px; border-radius: 10px; display: flex; align-items: center; gap: 12px; }
+  .chip:hover { background: var(--hover); }
+  .chip.on { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
+  .side-foot { margin-top: 10px; padding: 12px 8px 2px; border-top: 1px solid var(--line); }
+  .side-foot .toggle { width: 100%; justify-content: space-between; font-size: 15px; }
+  .chip .nm { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+  .chip .cnt { color: var(--muted); font-size: 14px; font-weight: 500; }
+  .chip.on .cnt { color: var(--accent-dark); }
   .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex: none; }
-  .chip.on .dot { box-shadow: 0 0 0 2px #fff; }
+  .content { min-width: 0; }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; gap: 12px; }
+    #side { position: static; padding: 8px; }
+    .side-title { display: none; }
+    .side-actions { flex-direction: row; flex-wrap: wrap; border-bottom: 0; padding-bottom: 8px; margin-bottom: 0; }
+    .side-actions button { width: auto; flex: 1; }
+    #filters { flex-direction: row; gap: 8px; overflow-x: auto; }
+    .chip { width: auto; border: 1px solid var(--border); background: var(--card); padding: 7px 14px; font-size: 14px; }
+    .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .chip.on .cnt { color: #fff; }
+  }
   .list { background: var(--card); border-radius: 16px; overflow: hidden; }
-  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
   .row:last-child { border-bottom: 0; }
   .row:hover { background: var(--hover); }
   .grip { cursor: grab; color: var(--muted); opacity: .45; display: grid; place-items: center; width: 18px; flex: none; margin-right: -6px; }
   .grip:hover { opacity: 1; }
   .grip svg.i { width: 14px; height: 14px; fill: currentColor; stroke: none; }
   .row.dragging { opacity: .35; }
-  .circle { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border); background: transparent; display: grid; place-items: center; color: #fff; padding: 0; flex: none; }
+  .circle { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--border); background: transparent; display: grid; place-items: center; color: #fff; padding: 0; flex: none; }
   .circle:hover { border-color: var(--accent); }
   .done .circle { background: var(--accent); border-color: var(--accent); }
-  .circle svg.i { width: 16px; height: 16px; stroke-width: 3; }
+  .circle svg.i { width: 14px; height: 14px; stroke-width: 3; }
   .main { min-width: 0; flex: 1; }
-  .msg { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
-  .meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; margin-top: 2px; }
-  .meta svg.i { width: 15px; height: 15px; }
+  .msg { font-weight: 600; font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+  .meta { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; margin-top: 1px; }
+  .meta svg.i { width: 13px; height: 13px; }
   .meta.dated { color: var(--accent); font-weight: 500; }
   .undated .msg { color: var(--undated) !important; }
   .done .msg { color: var(--done) !important; text-decoration: line-through; font-weight: 500; }
   .done .meta { color: var(--done); }
   .acts { display: flex; align-items: center; gap: 4px; flex: none; }
-  .ic { background: transparent; border: 0; color: var(--muted); padding: 6px 8px; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; font-size: 14px; }
+  .ic { background: transparent; border: 0; color: var(--muted); padding: 4px 7px; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; font-size: 14px; }
   .ic:hover { background: var(--accent-soft); color: var(--accent); }
   .ic.del { color: var(--danger); }
   .ic.del:hover { background: var(--accent-soft); color: var(--danger); }
@@ -170,20 +192,27 @@ object LocalAccessPage {
     <p class="error" id="pin-error"></p>
   </section>
   <section id="app">
-    <div class="bar">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+   <div class="layout">
+    <aside id="side">
+      <div class="side-actions">
         <button class="primary" id="new-btn" type="button"></button>
         <button class="outline" id="focus-btn" type="button"></button>
       </div>
-      <label class="toggle" style="margin:0">Mostrar concluídas
-        <input type="checkbox" id="show-done" checked><span class="sw"></span>
-      </label>
-    </div>
-    <div id="filters"></div>
+      <div class="side-title">Listas</div>
+      <nav id="filters"></nav>
+      <div class="side-foot">
+        <label class="toggle" style="margin:0">Mostrar concluídas
+          <input type="checkbox" id="show-done" checked><span class="sw"></span>
+        </label>
+      </div>
+    </aside>
+    <div class="content">
     <p class="hint" id="empty" style="display:none"></p>
     <div class="list" id="active" style="display:none"></div>
     <button type="button" class="sect" id="done-title" style="display:none"></button>
     <div class="list" id="done" style="display:none"></div>
+    </div>
+   </div>
   </section>
 </main>
 <div id="overlay">
@@ -267,6 +296,7 @@ object LocalAccessPage {
   var editingItem = null;
   var snapshot = "";
   var lists = [];
+  var openTotal = 0;
   var filterId = "";
   var choseFilter = false;
   var doneOpen = true;
@@ -434,14 +464,17 @@ object LocalAccessPage {
       msg.className = "msg";
       msg.textContent = item.message;
       if (!completed && item.hasDeadline) msg.style.color = colorFor(item.listId);
-      var meta = document.createElement("div");
-      meta.className = completed || !item.hasDeadline ? "meta" : "meta dated";
-      meta.innerHTML = icon("cal");
-      var when = document.createElement("span");
-      when.textContent = item.schedule;
-      meta.appendChild(when);
       main.appendChild(msg);
-      main.appendChild(meta);
+      // Só mostra a data quando a tarefa tem prazo; sem prazo fica só o título (lista mais compacta)
+      if (item.hasDeadline) {
+        var meta = document.createElement("div");
+        meta.className = completed ? "meta" : "meta dated";
+        meta.innerHTML = icon("cal");
+        var when = document.createElement("span");
+        when.textContent = item.schedule;
+        meta.appendChild(when);
+        main.appendChild(meta);
+      }
 
       var acts = document.createElement("div");
       acts.className = "acts";
@@ -489,28 +522,31 @@ object LocalAccessPage {
   function renderFilters() {
     var bar = document.getElementById("filters");
     bar.textContent = "";
-    function addChip(label, id, color) {
+    function addChip(label, id, color, count) {
       var chip = document.createElement("button");
       chip.type = "button";
       chip.className = filterId === id ? "chip on" : "chip";
-      if (color) {
-        var dot = document.createElement("span");
-        dot.className = "dot";
-        dot.style.background = color;
-        chip.appendChild(dot);
-      }
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = color;
+      chip.appendChild(dot);
       var text = document.createElement("span");
+      text.className = "nm";
       text.textContent = label;
       chip.appendChild(text);
+      var cnt = document.createElement("span");
+      cnt.className = "cnt";
+      cnt.textContent = String(count);
+      chip.appendChild(cnt);
       chip.onclick = function () {
         filterId = id;
         loadList();
       };
       bar.appendChild(chip);
     }
-    addChip("Todas", "", "");
+    addChip("Todas", "", "var(--muted)", openTotal);
     lists.forEach(function (list) {
-      addChip(list.name, String(list.id), list.color || "#6C3CE9");
+      addChip(list.name, String(list.id), list.color || "#6C3CE9", list.open || 0);
     });
   }
 
@@ -557,6 +593,7 @@ object LocalAccessPage {
         return;
       }
       lists = res.data.lists || [];
+      openTotal = res.data.openTotal || 0;
       if (!choseFilter) {
         choseFilter = true;
         var remindersList = null;

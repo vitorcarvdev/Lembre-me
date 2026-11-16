@@ -32,10 +32,15 @@ object WebReminders {
         val body = ReminderOrdering.ordered(visible, nowMillis).joinToString(",") { reminder ->
             reminderJson(reminder, lists, nowMillis, zone)
         }
+        // Tarefas abertas por lista (a coluna lateral mostra a contagem, igual ao menu do celular)
+        val openByList = reminders
+            .filter { !ReminderOrdering.isCompleted(it, nowMillis) }
+            .groupingBy { it.listId }
+            .eachCount()
         val listBody = lists.joinToString(",") { list ->
-            "{\"id\":${list.id},\"name\":${quoted(list.name)},\"isDefault\":${list.isDefault},\"color\":${quoted(ListColors.hex(list.name))}}"
+            "{\"id\":${list.id},\"name\":${quoted(list.name)},\"isDefault\":${list.isDefault},\"color\":${quoted(ListColors.hex(list.name))},\"open\":${openByList[list.id] ?: 0}}"
         }
-        return """{"lists":[$listBody],"reminders":[$body]}"""
+        return """{"lists":[$listBody],"openTotal":${openByList.values.sum()},"reminders":[$body]}"""
     }
 
     private fun reminderJson(
