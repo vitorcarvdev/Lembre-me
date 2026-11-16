@@ -29,6 +29,10 @@ class LocalAccessServer(
         return try {
             when {
                 method == Method.GET && path == "/" -> page()
+                method == Method.GET && path == "/icon.svg" ->
+                    asset("image/svg+xml; charset=utf-8", LocalAccessPage.ICON_SVG)
+                method == Method.GET && path == "/manifest.webmanifest" ->
+                    asset("application/manifest+json; charset=utf-8", LocalAccessPage.MANIFEST)
                 method == Method.POST && path == "/api/session" -> unlock(session)
                 method == Method.GET && path == "/api/reminders" -> guarded(session) { listResponse(session) }
                 method == Method.POST && path == "/api/reminders" -> guarded(session) { create(session) }
@@ -68,10 +72,35 @@ class LocalAccessServer(
         return response
     }
 
+    private fun asset(type: String, body: String): Response {
+        val response = newFixedLengthResponse(Response.Status.OK, type, body)
+        response.addHeader("Cache-Control", "public, max-age=3600")
+        return response
+    }
+
     private fun unlock(session: IHTTPSession): Response {
+        val waiting = gate.lockedForSeconds()
+        if (waiting > 0) return tooManyAttempts(waiting)
         val fields = readFields(session) ?: return unauthorized()
-        val token = gate.unlock(fields["pin"].orEmpty()) ?: return unauthorized()
+        val token = gate.unlock(fields["pin"].orEmpty())
+        if (token == null) {
+            // a tentativa errada pode ter acabado de travar o acesso
+            val locked = gate.lockedForSeconds()
+            return if (locked > 0) tooManyAttempts(locked) else unauthorized()
+        }
         return json(Response.Status.OK, """{"ok":true,"token":"$token"}""")
+    }
+
+    private fun tooManyAttempts(seconds: Long): Response {
+        val minutes = (seconds + 59) / 60
+        val response = newFixedLengthResponse(
+            TooManyRequests,
+            "application/json; charset=utf-8",
+            """{"ok":false,"error":"PIN errado 2 vezes. Tente de novo em $minutes min.","retrySeconds":$seconds}""",
+        )
+        response.addHeader("Cache-Control", "no-store")
+        response.addHeader("Retry-After", seconds.toString())
+        return response
     }
 
     private fun listResponse(session: IHTTPSession): Response {
@@ -209,5 +238,10 @@ class LocalAccessServer(
 
     private companion object {
         const val MAX_BODY_BYTES = 1_000_000
+    }
+
+    private object TooManyRequests : Response.IStatus {
+        override fun getDescription(): String = "429 Too Many Requests"
+        override fun getRequestStatus(): Int = 429
     }
 }

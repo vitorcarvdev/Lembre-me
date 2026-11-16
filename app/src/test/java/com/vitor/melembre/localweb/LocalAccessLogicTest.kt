@@ -70,6 +70,50 @@ class LocalAccessLogicTest {
     }
 
     @Test
+    fun gateLocksAfterTwoWrongPinsAndEscalates() {
+        var clock = 1_000_000L
+        val gate = LocalAccessGate("4821", now = { clock })
+
+        assertNull(gate.unlock("0000"))
+        assertEquals(0L, gate.lockedForSeconds())
+        assertNull(gate.unlock("1111"))
+        assertEquals(300L, gate.lockedForSeconds())
+
+        // durante o bloqueio nem o PIN certo entra
+        clock += 120_000
+        assertNull(gate.unlock("4821"))
+        assertEquals(180L, gate.lockedForSeconds())
+
+        // passados 5 minutos o PIN certo volta a funcionar e zera o histórico
+        clock += 181_000
+        assertEquals(0L, gate.lockedForSeconds())
+        assertTrue(gate.unlock("4821") != null)
+
+        // errar de novo depois de acertar começa do zero (5 min)
+        assertNull(gate.unlock("0000"))
+        assertNull(gate.unlock("0000"))
+        assertEquals(300L, gate.lockedForSeconds())
+
+        // bloqueios repetidos sem acerto no meio dobram o tempo
+        clock += 301_000
+        assertNull(gate.unlock("0000"))
+        assertNull(gate.unlock("0000"))
+        assertEquals(600L, gate.lockedForSeconds())
+    }
+
+    @Test
+    fun autoStartRemembersTheUsersChoice() {
+        val prefs = MemoryPinPreferences()
+        // nunca ligado: não religa sozinho
+        assertFalse(LocalAccessAuto.isEnabled(prefs))
+        LocalAccessAuto.setEnabled(prefs, true)
+        assertTrue(LocalAccessAuto.isEnabled(prefs))
+        // desligado de propósito: deixa de religar
+        LocalAccessAuto.setEnabled(prefs, false)
+        assertFalse(LocalAccessAuto.isEnabled(prefs))
+    }
+
+    @Test
     fun parsesFlatJson() {
         val parsed = MiniJson.parseFlatObject(
             """{"message":"comprar \"pao\"","date":"2026-10-05","time":"09:00","pin":4821}""",

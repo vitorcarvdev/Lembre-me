@@ -67,6 +67,18 @@ class LocalAccessServerTest {
     }
 
     @Test
+    fun twoWrongPinsLockTheLoginEvenForTheRightPin() {
+        assertEquals(401, exchange("POST", "/api/session", """{"pin":"0000"}""").first)
+        val locked = exchange("POST", "/api/session", """{"pin":"1111"}""")
+        assertEquals(429, locked.first)
+        assertTrue(locked.second.contains("Tente de novo em 5 min"))
+
+        val right = exchange("POST", "/api/session", """{"pin":"4821"}""")
+        assertEquals(429, right.first)
+        assertFalse(right.second.contains("\"token\""))
+    }
+
+    @Test
     fun remindersRequireSession() {
         val (code, _) = exchange("GET", "/api/reminders")
         assertEquals(401, code)

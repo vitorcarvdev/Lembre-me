@@ -47,14 +47,31 @@ class LocalAccessService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // intent nulo = o Android recriou o serviço depois de derrubá-lo (START_STICKY)
         when (intent?.action) {
             ACTION_STOP -> stopAccess()
+            ACTION_AUTO, null -> startAuto()
             else -> startAccess(
-                host = intent?.getStringExtra(EXTRA_HOST).orEmpty(),
-                pin = intent?.getStringExtra(EXTRA_PIN).orEmpty(),
+                host = intent.getStringExtra(EXTRA_HOST).orEmpty(),
+                pin = intent.getStringExtra(EXTRA_PIN).orEmpty(),
+                auto = false,
             )
         }
-        return START_NOT_STICKY
+        return if (running) START_STICKY else START_NOT_STICKY
+    }
+
+    /** Religa sozinho (boot, atualização do app, serviço recriado): só se o usuário deixou o acesso ligado. */
+    private fun startAuto() {
+        if (!LocalAccessAuto.isEnabled(this)) {
+            leaveForeground()
+            stopSelf()
+            return
+        }
+        startAccess(
+            host = LocalIp.wifiIpv4(this).orEmpty(),
+            pin = LocalPin.read(this),
+            auto = true,
+        )
     }
 
     override fun onDestroy() {
@@ -66,10 +83,12 @@ class LocalAccessService : Service() {
         super.onDestroy()
     }
 
-    private fun startAccess(host: String, pin: String) {
+    private fun startAccess(host: String, pin: String, auto: Boolean) {
         ensureChannel()
         startInForeground()
-        if (!LocalIp.isUsableLanIpv4(host)) {
+        // Religando sozinho o Wi-Fi pode ainda não ter subido: o servidor escuta em todas as
+        // interfaces e o IP mostrado é atualizado quando a rede chegar.
+        if (!auto && !LocalIp.isUsableLanIpv4(host)) {
             failStart(LocalAccessController.NO_WIFI_MESSAGE)
             return
         }
@@ -77,12 +96,14 @@ class LocalAccessService : Service() {
             failStart("Não foi possível abrir o acesso na rede.")
             return
         }
-        currentHost = host
+        currentHost = host.ifBlank { "localhost" }
         currentPin = pin
         if (!launchServer()) {
             failStart("Não foi possível abrir o acesso na rede.")
             return
         }
+        // A escolha do usuário fica guardada; religar sozinho não a altera
+        if (!auto) LocalAccessAuto.setEnabled(this, true)
         running = true
         acquireWifiLock()
         watchNetwork()
@@ -197,6 +218,8 @@ class LocalAccessService : Service() {
     }
 
     private fun stopAccess() {
+        // desligado de propósito pelo usuário: não religa mais sozinho
+        LocalAccessAuto.setEnabled(this, false)
         releaseResources()
         LocalAccessController.markOff()
         leaveForeground()
@@ -205,16 +228,21 @@ class LocalAccessService : Service() {
 
     private fun startInForeground() {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            inForeground = true
+        } catch (_: Exception) {
+            // religando em segundo plano o Android pode negar o modo em primeiro plano; o servidor
+            // continua e o vigia tenta de novo na próxima partida
         }
-        inForeground = true
     }
 
     private fun leaveForeground() {
@@ -271,6 +299,7 @@ class LocalAccessService : Service() {
         private const val WATCHDOG_MS = 30_000L
         private const val ACTION_START = "com.vitor.melembre.localweb.START"
         private const val ACTION_STOP = "com.vitor.melembre.localweb.STOP"
+        private const val ACTION_AUTO = "com.vitor.melembre.localweb.AUTO"
         private const val EXTRA_HOST = "host"
         private const val EXTRA_PIN = "pin"
 
@@ -281,6 +310,19 @@ class LocalAccessService : Service() {
                 putExtra(EXTRA_PIN, pin)
             }
             ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** Religa o acesso sozinho (boot / atualização do app); não faz nada se o usuário deixou desligado. */
+        fun startAuto(context: Context) {
+            if (!LocalAccessAuto.isEnabled(context)) return
+            val intent = Intent(context, LocalAccessService::class.java).apply {
+                action = ACTION_AUTO
+            }
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (_: Exception) {
+                // o Android pode negar a partida em segundo plano; o usuário religa pelo app
+            }
         }
 
         fun stop(context: Context) {

@@ -1,6 +1,18 @@
 package com.vitor.melembre.localweb
 
 object LocalAccessPage {
+    /** Ícone do app (sino roxo) usado pelo manifesto, para o Chrome instalar a página como app com ícone. */
+    const val ICON_SVG: String = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'>" +
+        "<rect width='108' height='108' rx='24' fill='#6C3CE9'/>" +
+        "<g transform='translate(54 54) scale(0.95) translate(-54 -54)' fill='#fff'>" +
+        "<path d='M54,30c-9.4,0 -17,7.6 -17,17v8.2c0,2.4 -1,4.7 -2.7,6.3l-4.2,4c-1.5,1.4 -0.5,3.9 1.5,3.9h45.8c2,0 3,-2.5 1.5,-3.9l-4.2,-4c-1.7,-1.6 -2.7,-3.9 -2.7,-6.3V47c0,-9.4 -7.6,-17 -17,-17z'/>" +
+        "<path d='M46,73h16c0,4.4 -3.6,8 -8,8s-8,-3.6 -8,-8z'/>" +
+        "</g></svg>"
+
+    const val MANIFEST: String = "{\"name\":\"Lembre-me\",\"short_name\":\"Lembre-me\",\"start_url\":\"/\"," +
+        "\"display\":\"standalone\",\"background_color\":\"#16151d\",\"theme_color\":\"#6C3CE9\"," +
+        "\"icons\":[{\"src\":\"/icon.svg\",\"sizes\":\"any\",\"type\":\"image/svg+xml\",\"purpose\":\"any\"}]}"
+
     const val HTML: String = """
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -8,6 +20,7 @@ object LocalAccessPage {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lembre-me</title>
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20108%20108'%3E%3Crect%20width='108'%20height='108'%20rx='24'%20fill='%236C3CE9'/%3E%3Cg%20transform='translate(54%2054)%20scale(0.95)%20translate(-54%20-54)'%20fill='%23fff'%3E%3Cpath%20d='M54,30c-9.4,0%20-17,7.6%20-17,17v8.2c0,2.4%20-1,4.7%20-2.7,6.3l-4.2,4c-1.5,1.4%20-0.5,3.9%201.5,3.9h45.8c2,0%203,-2.5%201.5,-3.9l-4.2,-4c-1.7,-1.6%20-2.7,-3.9%20-2.7,-6.3V47c0,-9.4%20-7.6,-17%20-17,-17z'/%3E%3Cpath%20d='M46,73h16c0,4.4%20-3.6,8%20-8,8s-8,-3.6%20-8,-8z'/%3E%3Cpath%20d='M70,38%20L73.5,41.5%20L65,50%20L59.5,44.5%20L63,41%20L65,43z'/%3E%3C/g%3E%3C/svg%3E">
 <script>
 (function () {
@@ -378,7 +391,8 @@ object LocalAccessPage {
         document.getElementById("pin-error").textContent = "";
         showApp();
       } else {
-        document.getElementById("pin-error").textContent = "PIN incorreto.";
+        document.getElementById("pin-error").textContent =
+          (res.data && res.data.error) ? res.data.error : "PIN incorreto.";
       }
     });
   };
