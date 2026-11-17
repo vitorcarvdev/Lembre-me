@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import com.vitor.melembre.data.AppDatabase
 import com.vitor.melembre.data.Recurrence
-import com.vitor.melembre.focus.FocusMode
 import com.vitor.melembre.notification.NotificationHelper
 import com.vitor.melembre.util.RecurrenceCalculator
 import kotlinx.coroutines.CoroutineScope
@@ -27,9 +26,7 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
                 }
 
                 val scheduledAt = reminder.scheduledAt ?: return@launch
-                if (!FocusMode.active) {
-                    NotificationHelper.showReminderNotification(context, reminder.id, reminder.message)
-                }
+                NotificationHelper.showReminderNotification(context, reminder.id, reminder.message)
 
                 val recurrence = reminder.recurrenceType
                 if (recurrence == Recurrence.NONE) {

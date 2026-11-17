@@ -1,6 +1,5 @@
 package com.vitor.melembre.localweb
 
-import com.vitor.melembre.focus.FocusSchedule
 import com.vitor.melembre.util.ReminderUrl
 import com.vitor.melembre.util.ReminderValidation
 import fi.iki.elonen.NanoHTTPD
@@ -44,8 +43,6 @@ class LocalAccessServer(
                     val id = snoozePath.find(path)!!.groupValues[1].toLong()
                     guarded(session) { mutate { actions.snoozeOneHour(id) } }
                 }
-                method == Method.GET && path == "/api/focus" -> guarded(session) { focusAgendaResponse() }
-                method == Method.POST && path == "/api/focus" -> guarded(session) { saveFocusAgenda(session) }
                 method == Method.POST && path == "/api/reminders/reorder" -> guarded(session) { reorder(session) }
                 method == Method.POST && completePath.matches(path) -> {
                     val id = completePath.find(path)!!.groupValues[1].toLong()
@@ -112,19 +109,6 @@ class LocalAccessServer(
             Response.Status.OK,
             WebReminders.remindersPayload(reminders, lists, nowMillis, zone, filter),
         )
-    }
-
-    private fun focusAgendaResponse(): Response {
-        val text = FocusSchedule.encode(actions.focusAgenda())
-        return json(Response.Status.OK, "{\"agenda\":\"${MiniJson.escape(text)}\"}")
-    }
-
-    private fun saveFocusAgenda(session: IHTTPSession): Response {
-        val fields = readFields(session) ?: return badRequest("Não foi possível salvar a agenda.")
-        val blocks = FocusSchedule.decode(fields["agenda"].orEmpty()) ?: return badRequest("Agenda inválida.")
-        FocusSchedule.validate(blocks)?.let { return badRequest(it) }
-        actions.saveFocusAgenda(blocks)
-        return json(Response.Status.OK, "{\"ok\":true}")
     }
 
     private fun reorder(session: IHTTPSession): Response {

@@ -170,13 +170,6 @@ object LocalAccessPage {
   .prev .pm { color: var(--done); text-decoration: line-through; overflow-wrap: anywhere; }
   .prev .meta { color: var(--done); }
   .tip { margin-top: 14px; background: var(--tip-bg); color: var(--tip-text); border-radius: 10px; padding: 11px 14px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
-  .frow { display: grid; grid-template-columns: 1fr 108px 108px auto auto; gap: 8px; align-items: center; margin-top: 10px; }
-  .frow input[type="text"], .frow input[type="time"] { padding: 8px 10px; }
-  .f-rest { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; white-space: nowrap; }
-  .f-rest input { width: auto; }
-  #focus-overlay { display: none; position: fixed; inset: 0; background: var(--overlay); align-items: center; justify-content: center; padding: 16px; z-index: 11; }
-  #focus-editor { width: 100%; max-width: 760px; max-height: 94vh; overflow-y: auto; padding: 24px; border-radius: 18px; box-shadow: 0 18px 50px rgba(0,0,0,.3); }
-  @media (max-width: 720px) { .frow { grid-template-columns: 1fr 1fr; } .frow .f-name { grid-column: 1 / -1; } }
   @media (max-width: 520px) { .acts .lbl { display: none; } .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -209,7 +202,6 @@ object LocalAccessPage {
     <aside id="side">
       <div class="side-actions">
         <button class="primary" id="new-btn" type="button"></button>
-        <button class="outline" id="focus-btn" type="button"></button>
       </div>
       <div class="side-title">Listas</div>
       <nav id="filters"></nav>
@@ -261,22 +253,6 @@ object LocalAccessPage {
     <div class="tip" id="tip"></div>
   </section>
 </div>
-<div id="focus-overlay">
-  <section id="focus-editor" class="card" role="dialog" aria-modal="true">
-    <div class="mhead">
-      <h3>Agenda do modo foco</h3>
-      <button class="close" id="focus-close" type="button" aria-label="Fechar"></button>
-    </div>
-    <p class="hint" style="margin:8px 0 0">Dentro de cada bloco: 25 min de foco e 5 de pausa. Marque Intervalo para blocos sem ciclos, como o almoço. A tela de foco no celular usa esta agenda.</p>
-    <div id="focus-rows"></div>
-    <p class="error" id="focus-error"></p>
-    <div class="btns">
-      <button class="outline" id="focus-add" type="button"></button>
-      <button class="primary" id="focus-save" type="button"></button>
-      <button class="link" id="focus-cancel" type="button">Cancelar</button>
-    </div>
-  </section>
-</div>
 <script>
 (function () {
   var ICONS = {
@@ -323,10 +299,6 @@ object LocalAccessPage {
 
   document.getElementById("logo").innerHTML = icon("bell");
   put("new-btn", "plus", "Nova tarefa");
-  put("focus-btn", "target", "Agenda de foco");
-  put("focus-close", "x", "");
-  put("focus-add", "plus", "Adicionar bloco");
-  put("focus-save", "check", "Salvar agenda");
   put("th-light", "sun", "Light");
   put("th-dark", "moon", "Dark");
   put("close-btn", "x", "");
@@ -725,67 +697,6 @@ object LocalAccessPage {
     document.getElementById(id).addEventListener("change", refreshSummary);
   });
 
-  var focusOverlay = document.getElementById("focus-overlay");
-  var focusRows = document.getElementById("focus-rows");
-
-  function addFocusRow(block) {
-    var row = document.createElement("div");
-    row.className = "frow";
-    row.innerHTML = '<input type="text" class="f-name" placeholder="Nome do bloco" maxlength="40" autocomplete="off">' +
-      '<input type="time" class="f-start"><input type="time" class="f-end">' +
-      '<label class="f-rest"><input type="checkbox" class="f-rest-box"> Intervalo</label>';
-    row.querySelector(".f-name").value = block.name;
-    row.querySelector(".f-start").value = block.start;
-    row.querySelector(".f-end").value = block.end;
-    row.querySelector(".f-rest-box").checked = block.rest;
-    row.appendChild(mkBtn("ic del", icon("trash"), "Remover bloco", function () { focusRows.removeChild(row); }));
-    focusRows.appendChild(row);
-  }
-
-  function openFocus() {
-    document.getElementById("focus-error").textContent = "";
-    focusRows.textContent = "";
-    request("GET", "/api/focus").then(function (res) {
-      var text = (res.data && res.data.agenda) || "";
-      text.split("\n").forEach(function (line) {
-        if (!line.trim()) return;
-        var p = line.split("|");
-        addFocusRow({ start: p[0], end: p[1], rest: p[2] === "1", name: p.slice(3).join("|") });
-      });
-      focusOverlay.style.display = "flex";
-    });
-  }
-
-  function closeFocus() { focusOverlay.style.display = "none"; }
-
-  document.getElementById("focus-btn").onclick = openFocus;
-  document.getElementById("focus-close").onclick = closeFocus;
-  document.getElementById("focus-cancel").onclick = closeFocus;
-  document.getElementById("focus-add").onclick = function () {
-    var rows = focusRows.querySelectorAll(".f-end");
-    var last = rows.length ? rows[rows.length - 1].value : "08:00";
-    addFocusRow({ name: "", start: last || "08:00", end: "", rest: false });
-  };
-  document.getElementById("focus-save").onclick = function () {
-    var lines = [];
-    var failed = "";
-    Array.prototype.forEach.call(focusRows.querySelectorAll(".frow"), function (row) {
-      var name = row.querySelector(".f-name").value.replace(/[|\n\r]/g, " ").trim();
-      var start = row.querySelector(".f-start").value;
-      var end = row.querySelector(".f-end").value;
-      if (!start || !end) failed = "Preencha o início e o fim de todos os blocos.";
-      lines.push(start + "|" + end + "|" + (row.querySelector(".f-rest-box").checked ? "1" : "0") + "|" + name);
-    });
-    if (failed) { document.getElementById("focus-error").textContent = failed; return; }
-    request("POST", "/api/focus", { agenda: lines.join("\n") }).then(function (res) {
-      if (ok(res)) closeFocus();
-      else document.getElementById("focus-error").textContent = (res.data && res.data.error) ? res.data.error : "Não foi possível salvar a agenda.";
-    });
-  };
-  focusOverlay.addEventListener("mousedown", function (event) {
-    if (event.target === focusOverlay) closeFocus();
-  });
-
   document.getElementById("new-btn").onclick = function () { openEditor(null); };
   document.getElementById("cancel-btn").onclick = function () { closeEditor(false); };
   document.getElementById("close-btn").onclick = function () { closeEditor(false); };
@@ -793,8 +704,7 @@ object LocalAccessPage {
     if (event.target === overlay) closeEditor(false);
   });
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && focusOverlay.style.display === "flex") closeFocus();
-    else if (event.key === "Escape" && overlay.style.display === "flex") closeEditor(false);
+    if (event.key === "Escape" && overlay.style.display === "flex") closeEditor(false);
   });
 
   function payload() {

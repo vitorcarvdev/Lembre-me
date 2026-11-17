@@ -78,9 +78,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vitor.melembre.alarm.ReminderScheduler
 import com.vitor.melembre.data.Recurrence
-import com.vitor.melembre.focus.FocusStore
-import com.vitor.melembre.ui.FocusScreen
-import com.vitor.melembre.ui.FocusSettingsScreen
 import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.localweb.LocalAccessController
 import com.vitor.melembre.localweb.LocalAccessService
@@ -247,7 +244,6 @@ private sealed class AppScreen {
     data object Home : AppScreen()
     data class Form(val reminder: Reminder?) : AppScreen()
     data object ManageLists : AppScreen()
-    data object Focus : AppScreen()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -294,19 +290,6 @@ private fun MeLembreAppContent(
     var showComputerAccess by remember { mutableStateOf(false) }
     var savedPin by remember { mutableStateOf(LocalPin.read(context)) }
     val computerAccess by LocalAccessController.state.collectAsStateWithLifecycle()
-    val focusStore = remember { FocusStore(context) }
-    var focusEnabled by remember { mutableStateOf(focusStore.isEnabled()) }
-    var focusOpen by rememberSaveable { mutableStateOf(false) }
-    // O foco só abre sozinho quando o acesso pelo computador é ligado agora (não ao abrir o app,
-    // nem ao girar a tela, nem depois de o usuário sair do foco).
-    var lastAutoFocus by remember { mutableStateOf(computerAccess.active && focusEnabled) }
-
-    LaunchedEffect(computerAccess.active, focusEnabled) {
-        val want = computerAccess.active && focusEnabled
-        if (want && !lastAutoFocus) focusOpen = true
-        if (!computerAccess.active) focusOpen = false
-        lastAutoFocus = want
-    }
 
     LaunchedEffect(voiceTrigger) {
         if (voiceTrigger > 0) {
@@ -402,15 +385,6 @@ private fun MeLembreAppContent(
                                 screen = AppScreen.ManageLists
                             }
                             DrawerEntry(
-                                label = "Modo foco",
-                                selected = false,
-                                count = null,
-                                leading = { Icon(Icons.Filled.Timer, contentDescription = null) },
-                            ) {
-                                scope.launch { drawerState.close() }
-                                screen = AppScreen.Focus
-                            }
-                            DrawerEntry(
                                 label = stringResource(R.string.computer_access),
                                 selected = false,
                                 count = null,
@@ -470,13 +444,6 @@ private fun MeLembreAppContent(
                         CenterAlignedTopAppBar(
                             title = { HomeHeader(compact = reminders.isNotEmpty()) },
                             actions = {
-                                IconButton(onClick = { focusOpen = true }) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Timer,
-                                        contentDescription = "Entrar no modo foco",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
                                 IconButton(onClick = { showComputerAccess = true }) {
                                     Icon(
                                         imageVector = Icons.Filled.Computer,
@@ -610,21 +577,6 @@ private fun MeLembreAppContent(
                 )
             }
 
-            AppScreen.Focus -> {
-                val focusAgenda = remember { focusStore.load() }
-                FocusSettingsScreen(
-                    enabled = focusEnabled,
-                    onEnabledChange = {
-                        focusEnabled = it
-                        focusStore.setEnabled(it)
-                    },
-                    agenda = focusAgenda,
-                    onSaveAgenda = { focusStore.save(it) },
-                    onOpenNow = { focusOpen = true },
-                    onBack = { screen = AppScreen.Home },
-                )
-            }
-
             AppScreen.ManageLists -> {
                 ManageListsScreen(
                     lists = taskLists,
@@ -646,11 +598,6 @@ private fun MeLembreAppContent(
                 )
             }
         }
-    }
-
-    if (focusOpen) {
-        val agendaNow = remember { focusStore.load() }
-        FocusScreen(agenda = agendaNow, onExit = { focusOpen = false })
     }
 
     pendingConfirm?.let { parsed ->

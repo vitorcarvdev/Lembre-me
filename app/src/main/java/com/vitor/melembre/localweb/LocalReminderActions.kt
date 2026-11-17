@@ -1,8 +1,6 @@
 package com.vitor.melembre.localweb
 
 import com.vitor.melembre.data.Recurrence
-import com.vitor.melembre.focus.FocusAgenda
-import com.vitor.melembre.focus.FocusBlock
 import com.vitor.melembre.data.Reminder
 import com.vitor.melembre.data.TaskList
 import com.vitor.melembre.repository.ReminderRepository
@@ -17,8 +15,6 @@ interface LocalReminderActions {
     suspend fun complete(id: Long): Result<Unit>
     suspend fun reopen(id: Long): Result<Unit>
     suspend fun reorder(listId: Long, orderedIds: List<Long>): Result<Unit>
-    fun focusAgenda(): List<FocusBlock> = emptyList()
-    fun saveFocusAgenda(blocks: List<FocusBlock>) {}
 }
 
 sealed class LocalAccessFailure : Exception() {
@@ -30,14 +26,7 @@ sealed class LocalAccessFailure : Exception() {
 
 class RepositoryReminderActions(
     private val repository: ReminderRepository,
-    private val focus: FocusAgenda? = null,
 ) : LocalReminderActions {
-    override fun focusAgenda(): List<FocusBlock> = focus?.load().orEmpty()
-
-    override fun saveFocusAgenda(blocks: List<FocusBlock>) {
-        focus?.save(blocks)
-    }
-
     override suspend fun lists(): List<TaskList> = repository.lists()
 
     override suspend fun list(): List<Reminder> = repository.listHome()

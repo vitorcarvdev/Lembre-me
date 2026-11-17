@@ -21,7 +21,6 @@ import androidx.core.content.ContextCompat
 import com.vitor.melembre.MainActivity
 import com.vitor.melembre.MeLembreApp
 import com.vitor.melembre.R
-import com.vitor.melembre.focus.FocusStore
 import kotlin.concurrent.thread
 
 class LocalAccessService : Service() {
@@ -120,7 +119,7 @@ class LocalAccessService : Service() {
         return try {
             server?.stop()
             server = null
-            val actions = RepositoryReminderActions((application as MeLembreApp).reminderRepository, FocusStore(this))
+            val actions = RepositoryReminderActions((application as MeLembreApp).reminderRepository)
             val next = LocalAccessServer(LocalAccessHealth.ANY_HOST, LocalAccessController.PORT, currentPin, actions)
             next.start()
             server = next

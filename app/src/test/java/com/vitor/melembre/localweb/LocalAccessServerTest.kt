@@ -149,23 +149,10 @@ class LocalAccessServerTest {
     }
 
     @Test
-    fun focusAgendaCanBeReadAndSaved() {
+    fun focusRoutesNoLongerExist() {
         val token = unlock()
-        val read = exchange("GET", "/api/focus", token = token)
-        assertEquals(200, read.first)
-        assertTrue(read.second.contains("VitProspect 1"))
-        assertTrue(read.second.contains("12:00|13:00|1|Almoço"))
-
-        val saved = exchange("POST", "/api/focus", "{\"agenda\":\"09:00|10:00|0|Estudo\\n10:00|10:30|1|Café\"}", token)
-        assertEquals(200, saved.first)
-        assertEquals(listOf("Estudo", "Café"), memory.agenda.map { it.name })
-        assertTrue(memory.agenda[1].rest)
-
-        val overlap = exchange("POST", "/api/focus", "{\"agenda\":\"09:00|10:00|0|A\\n09:30|11:00|0|B\"}", token)
-        assertEquals(400, overlap.first)
-        val broken = exchange("POST", "/api/focus", "{\"agenda\":\"lixo\"}", token)
-        assertEquals(400, broken.first)
-        assertEquals(listOf("Estudo", "Café"), memory.agenda.map { it.name })
+        assertEquals(404, exchange("GET", "/api/focus", token = token).first)
+        assertEquals(404, exchange("POST", "/api/focus", "{\"agenda\":\"09:00|10:00|0|A\"}", token).first)
     }
 
     @Test
@@ -389,14 +376,6 @@ class LocalAccessServerTest {
         override suspend fun delete(id: Long): Result<Unit> {
             val removed = items.removeAll { it.id == id }
             return if (removed) Result.success(Unit) else Result.failure(LocalAccessFailure.Missing())
-        }
-
-        var agenda: List<com.vitor.melembre.focus.FocusBlock> = com.vitor.melembre.focus.FocusSchedule.DEFAULT
-
-        override fun focusAgenda() = agenda
-
-        override fun saveFocusAgenda(blocks: List<com.vitor.melembre.focus.FocusBlock>) {
-            agenda = blocks
         }
 
         override suspend fun reorder(listId: Long, orderedIds: List<Long>): Result<Unit> {
